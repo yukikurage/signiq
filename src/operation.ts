@@ -10,6 +10,11 @@ export interface Slot<T> extends ReadonlySlot<T> {
   modify(updater: (currentValue: T) => T): void;
 }
 
+export type Context<Value> = {
+  use: () => Routine<Value>;
+  provide: (value: Value) => Routine<void>;
+};
+
 export async function* slot<T>(initialValue: T): Routine<Slot<T>> {
   let currentValue = initialValue; // current value (mutable)
 
@@ -68,6 +73,8 @@ function makeInternalMiniObservable<T>(initialValue: T) {
 export async function* observe(
   mkRoutine: () => Routine<void> // routine factory
 ): Routine<void> {
+  const ctxs = yield* getContexts();
+
   const deferredFunctions: Set<() => Promise<void> | void> = new Set(); // deferred functions, execute by `recall` or parent routine cancellation
   let parentCancelled: MiniObservable<boolean> =
     makeInternalMiniObservable(false); // whether parent routine is canceled
@@ -82,6 +89,7 @@ export async function* observe(
       if (parentCancelled.get()) {
         break; // stop if parent routine canceled
       }
+      const childCtxs = { ...ctxs }; // Copy context (mutable state)
       cancelled.set(false); // reset cancellation
       const itr = mkRoutine();
       let lastResult: any = undefined;
@@ -114,6 +122,7 @@ export async function* observe(
         }
         if (value.type === 'defer') {
           deferredFunctions.add(value.cleanup); // defer execution
+          lastResult = undefined;
         } else if (value.type === 'addDependency') {
           const cancel = () => {
             cancelled.set(true);
@@ -122,6 +131,9 @@ export async function* observe(
           deferredFunctions.add(async () => {
             value.store.delete(cancel); // cleanup when routine canceled
           });
+          lastResult = undefined;
+        } else if (value.type === 'getContexts') {
+          lastResult = childCtxs; // provide container
         }
       }
       processCount.set(processCount.get() - 1);
@@ -157,6 +169,29 @@ export async function* defer(fn: () => Promise<void> | void): Routine<void> {
 
 export async function* checkpoint(): Routine<void> {
   yield { type: 'checkpoint' as const };
+}
+
+async function* getContexts(): Routine<Record<symbol, any>> {
+  const container = yield { type: 'getContexts' as const };
+  return container as Record<string, any>;
+}
+
+export function context<T>(): Context<T> {
+  const key = Symbol();
+  return {
+    use: async function* () {
+      const ctxs = yield* getContexts();
+      if (!(key in ctxs)) {
+        throw new Error('Context not found');
+      }
+      return ctxs[key] as T;
+    },
+    provide: async function* (value: T) {
+      console.log('Providing context');
+      const ctxs = yield* getContexts();
+      ctxs[key] = value;
+    },
+  };
 }
 
 // Derive a readonly slot from a routine
@@ -246,6 +281,7 @@ export async function launch<T>(mkRoutine: () => Routine<T>): Promise<App<T>> {
 
   // Start the app routine
   let lastResult: any = undefined;
+  let childCtxs = {};
   while (true) {
     const { value, done } = await itr.next(lastResult); // execute until next yield
     if (done) {
@@ -254,10 +290,13 @@ export async function launch<T>(mkRoutine: () => Routine<T>): Promise<App<T>> {
     }
     if (value.type === 'defer') {
       deferredFunctions.add(value.cleanup); // defer execution
+      lastResult = undefined;
     } else if (value.type === 'addDependency') {
       throw new Error(
         'App routine cannot depend on slots. Use observe() instead.'
       );
+    } else if (value.type === 'getContexts') {
+      lastResult = childCtxs; // provide container
     }
   }
 

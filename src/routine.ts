@@ -9,8 +9,11 @@ export type RoutineYield =
     }
   | {
       type: 'checkpoint'; // checkpoint for cancellation
+    }
+  | {
+      type: 'getContexts';
     };
 
-export type Routine<TReturn = any> =
-  | AsyncGenerator<RoutineYield, TReturn, any>
-  | Generator<RoutineYield, TReturn, any>;
+export type Routine<TReturn = void> =
+  | AsyncGenerator<RoutineYield, TReturn>
+  | Generator<RoutineYield, TReturn>;
