@@ -1,7 +1,8 @@
 {
-  "name": "signiq",
-  "version": "1.0.0",
+  "name": "@quon/core",
+  "version": "0.1.0",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "lint": "eslint src/**/*.{ts,tsx}",
@@ -10,10 +11,29 @@
     "format:check": "prettier --check src/**/*.{ts,tsx,js,json}",
     "test": "tsx test.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "reactive",
+    "generator",
+    "coroutine",
+    "async",
+    "typescript"
+  ],
+  "author": "yukikurage",
+  "license": "MIT",
+  "description": "A lightweight reactive programming library using generator-based routines",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quon-org/core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/quon-org/core/issues"
+  },
+  "homepage": "https://github.com/quon-org/core#readme",
   "devDependencies": {
     "@types/node": "^24.3.3",
     "@typescript-eslint/eslint-plugin": "^8.43.0",

@@ -17,14 +17,14 @@ This is a reactive programming library built around **Routines** - generator-bas
 ### Core Concepts
 
 - **Routine**: Generator function that yields control flow instructions (`src/routine.ts`)
-- **Slot**: Reactive state container with getter/setter (`src/signal.ts`)
-- **Observer**: Manages routine lifecycle and dependency tracking (`src/signal.ts`)
+- **Slot**: Reactive state container with getter/setter (`src/operation.ts`)
+- **Observer**: Manages routine lifecycle and dependency tracking (`src/operation.ts`)
 
 ### Key Files
 
 - `src/routine.ts`: Defines the `Routine` type and yield instruction types
-- `src/signal.ts`: Implements slots, observers, and reactive operations
-- `src/index.ts`: Main entry point (currently minimal)
+- `src/operation.ts`: Implements slots, observers, and reactive operations
+- `src/index.ts`: Main entry point
 
 ### Reactive System
 
