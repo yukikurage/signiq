@@ -9,8 +9,7 @@ async function* counterExample(): Routine<void> {
 
   // Create an observer that logs the counter value
   yield* observe(async function* () {
-    const value = yield* counter.get();
-    console.log('Counter value:', value);
+    console.log('Counter value:', yield* counter.get());
   });
 
   // Update the counter value after 1 second
