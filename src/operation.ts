@@ -195,7 +195,7 @@ export async function* wait(ms: number): Routine<void> {
 export async function* clock(ms: number): Routine<ReadonlySlot<number>> {
   const cl = yield* slot(0);
   const id = setInterval(() => {
-    cl.set(Date.now());
+    cl.modify(v => v + 1);
   }, ms);
   yield* defer(() => {
     clearInterval(id);
