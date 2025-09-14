@@ -34,14 +34,12 @@ async function* derivedExample$(): Routine<void> {
 
   // Create a derived slot that doubles the base value
   const doubledValue$ = yield* derive$(async function* () {
-    const value = yield* baseValue$();
-    return value * 2;
+    return (yield* baseValue$()) * 2;
   });
 
   // Observer for the doubled value
   yield* observe$(async function* () {
-    const value = yield* doubledValue$();
-    console.log('Doubled value:', value);
+    console.log('Doubled value:', yield* doubledValue$());
   });
 
   // Update base value

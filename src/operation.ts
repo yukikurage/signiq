@@ -262,7 +262,7 @@ export async function* derive$<T>(
 
   const newSlot: Slot<T> = yield* slot$(initialValue as T);
   callback = v => {
-    newSlot.set(v);
+    if (v !== newSlot.peek()) newSlot.set(v);
   };
   return newSlot;
 }
