@@ -14,6 +14,4 @@ export type RoutineYield =
       type: 'getContexts';
     };
 
-export type Routine<TReturn = void> =
-  | AsyncGenerator<RoutineYield, TReturn>
-  | Generator<RoutineYield, TReturn>;
+export type Routine<TReturn = void> = AsyncGenerator<RoutineYield, TReturn>;

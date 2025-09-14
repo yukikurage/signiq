@@ -1,22 +1,22 @@
 import {
-  slot,
-  observe,
-  derive,
-  wait,
+  slot$,
+  observe$,
+  derive$,
+  wait$,
   launch,
-  clock,
-  interval,
-  until,
-  checkpoint,
-  defer,
+  clock$,
+  interval$,
+  until$,
+  checkpoint$,
+  defer$,
   Routine,
 } from './src';
 
-// Test slot modify and peek methods
-async function* slotMethodsTest(): Routine<void> {
-  console.log('=== Slot Methods Test ===');
+// Test slot$ modify and peek methods
+async function* slotMethodsTest$(): Routine<void> {
+  console.log('=== Slot$ Methods Test ===');
 
-  const counter = yield* slot(10);
+  const counter = yield* slot$(10);
 
   // Test peek (should not create dependency)
   console.log('Initial value (peek):', counter.peek());
@@ -28,149 +28,167 @@ async function* slotMethodsTest(): Routine<void> {
   counter.modify(x => x + 5);
   console.log('After modify (+5):', counter.peek());
 
-  yield* wait(100);
+  yield* wait$(100);
 }
 
-// Test clock operation
-async function* clockTest(): Routine<void> {
-  console.log('\n=== Clock Test ===');
+// Test clock$ operation
+async function* clockTest$(): Routine<void> {
+  console.log('\n=== Clock$ Test ===');
 
-  const cl = yield* clock(50); // Update every 50ms
+  const cl$ = yield* clock$(50); // Update every 50ms
 
   let count = 0;
-  yield* observe(async function* () {
-    const timestamp = yield* cl.get();
-    console.log(`Clock tick ${++count}:`, new Date(timestamp).toISOString());
+  yield* observe$(async function* () {
+    const timestamp = yield* cl$();
+    console.log(`Clock$ tick ${++count}:`, new Date(timestamp).toISOString());
   });
 
   // Let it run for a bit
-  yield* wait(250);
-  console.log('Clock test completed');
+  yield* wait$(250);
+  console.log('Clock$ test completed');
 }
 
-// Test interval operation
-async function* intervalTest(): Routine<void> {
-  console.log('\n=== Interval Test ===');
+// Test interval$ operation
+async function* intervalTest$(): Routine<void> {
+  console.log('\n=== Interval$ Test ===');
 
-  let intervalCount = 0;
-  yield* interval(
-    async function* (clockValue) {
-      console.log(`Interval callback ${++intervalCount}, clock:`, clockValue);
-      yield* checkpoint(); // Allow cancellation
+  let interval$Count = 0;
+  yield* interval$(
+    async function* () {
+      console.log(`Interval$ callback ${++interval$Count}`);
+      yield* checkpoint$(); // Allow
     },
     100 // Every 100ms
   );
 
   // Let it run for a bit
-  yield* wait(350);
-  console.log('Interval test completed');
+  yield* wait$(350);
+  console.log('Interval$ test completed');
 }
 
-// Test until operation
-async function* untilTest(): Routine<void> {
-  console.log('\n=== Until Test ===');
+// Test until$ operation
+async function* untilTest$(): Routine<void> {
+  console.log('\n=== Until$ Test ===');
 
-  const progressSlot = yield* slot(0);
+  const progressSlot$ = yield* slot$(0);
 
   // Start a process that will update the progress
   (async () => {
     for (let i = 1; i <= 5; i++) {
       await new Promise(resolve => setTimeout(resolve, 80));
-      progressSlot.set(i);
+      progressSlot$.set(i);
     }
   })();
 
-  // Wait until progress reaches 3
-  const result = yield* until(value => value >= 3, progressSlot);
-  console.log('Until condition met with value:', result);
+  // Wait$ until$ progress reaches 3
+  const result = yield* until$(value => value >= 3, progressSlot$);
+  console.log('Until$ condition met with value:', result);
 
-  yield* wait(100);
+  yield* wait$(100);
 }
 
-// Test defer operation
-async function* deferTest(): Routine<void> {
-  console.log('\n=== Defer Test ===');
+// Test defer$ operation
+async function* deferTest$(): Routine<void> {
+  console.log('\n=== Defer$ Test ===');
 
-  console.log('Starting defer test...');
+  console.log('Starting defer$ test...');
 
-  yield* defer(async () => {
-    console.log('Deferred cleanup executed!');
+  yield* defer$(async () => {
+    console.log('Defer$red cleanup executed!');
   });
 
-  yield* wait(100);
-  console.log('Defer test main logic completed');
+  yield* wait$(100);
+  console.log('Defer$ test main logic completed');
   // Cleanup should execute when this routine completes
 }
 
-// Test complex derive operation
-async function* complexDeriveTest(): Routine<void> {
-  console.log('\n=== Complex Derive Test ===');
+// Test complex derive$ operation
+async function* complexDeriveTest$(): Routine<void> {
+  console.log('\n=== Complex Derive$ Test ===');
 
-  const x = yield* slot(2);
-  const y = yield* slot(3);
+  const x$ = yield* slot$(2);
+  const y$ = yield* slot$(3);
 
-  // Derive a value that depends on both slots
-  const sum = yield* derive(async function* () {
-    const xVal = yield* x.get();
-    const yVal = yield* y.get();
-    return xVal + yVal;
+  // Derive$ a value that depends on both slot$s
+  const sum$ = yield* derive$(async function* () {
+    return (yield* x$()) + (yield* y$());
   });
 
-  const product = yield* derive(async function* () {
-    const xVal = yield* x.get();
-    const yVal = yield* y.get();
-    return xVal * yVal;
+  const product$ = yield* derive$(async function* () {
+    return (yield* x$()) * (yield* y$());
   });
 
-  // Combine multiple derived values
-  const combined = yield* derive(async function* () {
-    const sumVal = yield* sum.get();
-    const prodVal = yield* product.get();
-    return `sum: ${sumVal}, product: ${prodVal}`;
+  // Combine multiple derive$d values
+  const combined$ = yield* derive$(async function* () {
+    return `sum: ${yield* sum$()}, product: ${yield* product$()}`;
   });
 
-  yield* observe(async function* () {
-    const result = yield* combined.get();
+  yield* observe$(async function* () {
+    const result = yield* combined$();
     console.log('Combined result:', result);
   });
 
-  yield* wait(100);
-  x.set(5);
+  yield* wait$(100);
+  x$.set(5);
 
-  yield* wait(100);
-  y.set(7);
+  yield* wait$(100);
+  y$.set(7);
 
-  yield* wait(100);
+  yield* wait$(100);
 }
 
-// Test nested observers
-async function* nestedObserverTest(): Routine<void> {
-  console.log('\n=== Nested Observer Test ===');
+// Test nested observe$rs
+async function* nestedObserverTest$(): Routine<void> {
+  console.log('\n=== Nested Observer$ Test ===');
 
-  const trigger = yield* slot(0);
-  const data = yield* slot('initial');
+  const trigger$ = yield* slot$(0);
+  const data$ = yield* slot$('initial');
 
-  yield* observe(async function* () {
-    const triggerVal = yield* trigger.get();
-    console.log(`Outer observer triggered: ${triggerVal}`);
+  yield* observe$(async function* () {
+    console.log(`Outer observer$ triggered: ${yield* trigger$()}`);
 
-    // Nested observer
-    yield* observe(async function* () {
-      const dataVal = yield* data.get();
-      console.log(`  Inner observer sees data: ${dataVal}`);
+    // Nested observe$r
+    yield* observe$(async function* () {
+      console.log(`  Inner observe$r sees data: ${yield* data$()}`);
     });
   });
 
-  yield* wait(100);
-  trigger.set(1);
+  yield* wait$(100);
+  trigger$.set(1);
 
-  yield* wait(100);
-  data.set('updated');
+  yield* wait$(100);
+  data$.set('updated');
 
-  yield* wait(100);
-  trigger.set(2);
+  yield* wait$(100);
+  trigger$.set(2);
 
-  yield* wait(100);
+  yield* wait$(100);
+}
+
+async function* cancellationTest$(): Routine<void> {
+  console.log('\n=== Cancellation Test ===');
+
+  yield* observe$(async function* () {
+    yield* interval$(
+      async function* (count) {
+        console.log(count);
+        console.log(`Interval$ started`);
+        yield* defer$(() => {
+          console.log('Interval$ cleanup executed');
+        });
+        yield* wait$(500); // Simulate long work
+        yield* checkpoint$(); // Allow cancellation
+        console.log('Interval$ finished work');
+        yield* defer$(() => {
+          console.log('Post-work cleanup executed');
+        });
+      },
+      200 // Every 200ms
+    );
+  });
+
+  // Let it run for a bit
+  yield* wait$(700);
 }
 
 // Run all tests
@@ -178,17 +196,19 @@ async function* nestedObserverTest(): Routine<void> {
   console.log('Starting comprehensive operation tests...\n');
 
   const tests = [
-    slotMethodsTest,
-    clockTest,
-    intervalTest,
-    untilTest,
-    deferTest,
-    complexDeriveTest,
-    nestedObserverTest,
+    slotMethodsTest$,
+    clockTest$,
+    intervalTest$,
+    untilTest$,
+    deferTest$,
+    complexDeriveTest$,
+    nestedObserverTest$,
+    cancellationTest$,
   ];
 
   for (const test of tests) {
-    const app = await launch(test);
+    const app = launch(test);
+    await app.ready;
     await app.quit();
     await new Promise(resolve => setTimeout(resolve, 200)); // Small delay between tests
   }

@@ -1,53 +1,52 @@
 import {
   context,
-  interval,
+  interval$,
   launch,
-  observe,
+  observe$,
   ReadonlySlot,
   Routine,
-  slot,
+  slot$,
   Slot,
-  wait,
+  wait$,
 } from './src';
 
 type GlobalCount = {
-  globalCount: Slot<number>;
+  globalCount$: Slot<number>;
 };
 
 const globalCountContext = context<GlobalCount>();
 
 async function* contextExample(): Routine<void> {
-  const count = yield* slot(0);
-  yield* globalCountContext.provide({ globalCount: count });
+  const count$ = yield* slot$(0);
+  yield* globalCountContext.provide$({ globalCount$: count$ });
 
   // Child process 1
-  yield* interval(childProcess, 100);
+  yield* interval$(childProcess, 100);
 
   // Child process 2
-  yield* observe(displayProcess);
+  yield* observe$(displayProcess);
 
-  yield* wait(550);
+  yield* wait$(550);
 }
 
 // Child process 1
 async function* childProcess(): Routine<void> {
-  const { globalCount } = yield* globalCountContext.use();
-  globalCount.modify(v => v + 1);
+  const { globalCount$ } = yield* globalCountContext.use$();
+  globalCount$.modify(v => v + 1);
 }
 
 // Child process 2
 async function* displayProcess(): Routine<void> {
-  const { globalCount } = yield* globalCountContext.use();
-  yield* observe(async function* () {
-    console.log('Global count:', yield* globalCount.get());
+  const { globalCount$ } = yield* globalCountContext.use$();
+  yield* observe$(async function* () {
+    console.log('Global count:', yield* globalCount$());
   });
 }
 
-// Run the example
-
 // Run the examples
 (async () => {
-  const counterApp = await launch(contextExample);
+  const counterApp = launch(contextExample);
+  await counterApp.ready;
   counterApp.quit();
   console.log('\nTest completed!');
 })();
