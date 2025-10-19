@@ -1,6 +1,14 @@
-# Quon Core
+# @quon/core
 
-A lightweight reactive programming library using generator-based routines for TypeScript/JavaScript.
+A lightweight reactive programming library using generator-based routines for managing state and side effects.
+
+## Features
+
+- **Reactive Atoms**: Simple state containers with automatic dependency tracking
+- **Resources**: Computed values that automatically update when dependencies change
+- **External Effects**: Clean separation of side effects with proper cleanup
+- **Context API**: Type-safe dependency injection
+- **Lifecycle Management**: Automatic cleanup of resources and effects
 
 ## Installation
 
@@ -11,119 +19,142 @@ npm install @quon/core
 ## Quick Start
 
 ```typescript
-import { slot$, observe$, launch } from '@quon/core';
+import { withAtom, withResource, withExternal, launchRoutine } from '@quon/core';
 
-// Create a reactive counter example
-async function* example() {
-  // Create a reactive slot with initial value 0
-  const counter$ = yield* slot$(0);
+function Counter(): void {
+  // Create a reactive atom
+  const count = withAtom<number>(0);
 
-  // Observe changes and log them
-  yield* observe$(async function* () {
-    const value = yield* counter$();
-    console.log('Counter value:', value);
+  // Create a computed value
+  const doubled = withResource(() => count() * 2);
+
+  // Observe changes and perform side effects
+  withResource(() => {
+    const value = doubled();
+    withExternal(() => {
+      console.log('Doubled value:', value);
+    });
   });
 
-  // Update the counter value
-  counter$.set(1);
-  counter$.set(2);
-  counter$.set(3);
+  // Update the count
+  withExternal(() => count.set(1));
 }
 
-// Launch the app
-const app = await launch(example);
-app.quit();
+const app = launchRoutine(Counter);
+// Later: await app.exit();
 ```
 
 ## Core Concepts
 
-- **Routine**: Generator functions that yield control flow instructions
-- **Slot**: Reactive state containers with automatic dependency tracking
-- **Observer**: Manages routine lifecycle and re-execution on dependency changes
-- **Derive**: Creates readonly computed values that automatically update
+### Atoms
 
-## API
-
-> **Note**: Functions with `$` suffix return `Routine<T>` and must be called with `yield*`
-
-### `slot$<T>(initialValue: T)`
-
-Creates a reactive slot with getter/setter methods.
+Atoms are reactive state containers:
 
 ```typescript
-const count$ = yield * slot$(0);
-const value = yield * count$(); // Get current value
-count$.set(5); // Set new value
+const count = withAtom<number>(0);
+
+// Read value (creates dependency)
+const value = count();
+
+// Read without dependency
+const value = count.peek();
+
+// Update value
+await count.set(1);
 ```
 
-### `observe$(routine)`
+### Resources
 
-Observes a routine and re-runs it when dependencies change.
+Resources are computed values that automatically update:
 
 ```typescript
-yield *
-  observe$(async function* () {
-    const value = yield* someSlot$();
-    console.log('Value changed:', value);
+const x = withAtom<number>(2);
+const y = withAtom<number>(3);
+
+// Automatically recomputes when x or y changes
+const sum = withResource(() => x() + y());
+```
+
+### External Effects
+
+Side effects should be wrapped in `withExternal`:
+
+```typescript
+withExternal((addDisposer) => {
+  // Setup
+  console.log('Starting...');
+  const interval = setInterval(() => console.log('tick'), 1000);
+
+  // Cleanup
+  addDisposer(() => {
+    clearInterval(interval);
+    console.log('Stopped');
   });
+});
 ```
 
-### `derive$(routine)`
+### Context API
 
-Creates a readonly slot derived from other reactive values.
+Type-safe dependency injection:
 
 ```typescript
-const doubled$ =
-  yield *
-  derive$(async function* () {
-    const value = yield* baseValue$();
-    return value * 2;
-  });
+type AppContext = {
+  theme: Atom<'light' | 'dark'>;
+};
+
+const appContext = createContext<AppContext>();
+
+// Provide context
+const theme = withAtom<'light' | 'dark'>('light');
+appContext.withProvider({ theme }, () => {
+  // Consume context
+  const ctx = appContext.withContext();
+  if (ctx) {
+    const currentTheme = ctx.theme();
+    // Use theme...
+  }
+});
 ```
 
-### `wait$(milliseconds)`
+## Development
 
-Pauses execution for the specified number of milliseconds.
+```bash
+# Run tests
+npm test
 
-```typescript
-yield * wait$(1000); // Wait 1 second
+# Run tests in watch mode
+npm run test:watch
+
+# Run examples
+npm run examples
+
+# Build
+npm run build
+
+# Lint
+npm run lint
+
+# Format
+npm run format
 ```
 
-### `launch(routine)`
+## Project Structure
 
-Launches an app routine and returns an object with a quit method.
-
-```typescript
-const app = await launch(myRoutine);
-await app.quit(); // Clean shutdown
 ```
-
-## Examples
-
-### Derived Values
-
-```typescript
-async function* derivedExample() {
-  // Base reactive value
-  const temperature$ = yield* slot$(20);
-
-  // Derived Fahrenheit value
-  const fahrenheit$ = yield* derive$(async function* () {
-    const celsius = yield* temperature$();
-    return (celsius * 9) / 5 + 32;
-  });
-
-  // Observer that logs both values
-  yield* observe$(async function* () {
-    const c = yield* temperature$();
-    const f = yield* fahrenheit$();
-    console.log(`${c}°C = ${f}°F`);
-  });
-
-  // Update temperature
-  temperature$.set(25);
-  temperature$.set(30);
-}
+quon/
+├── src/           # Source code
+│   ├── routine.ts     # Core routine implementation
+│   ├── resource.ts    # Atoms and resources
+│   ├── context.ts     # Context API
+│   └── index.ts       # Public exports
+├── tests/         # Test files
+│   ├── basic.test.ts
+│   ├── context.test.ts
+│   └── nested.test.ts
+└── examples/      # Example usage
+    ├── basic.ts
+    ├── context.ts
+    └── operations.ts
 ```
 
 ## License
