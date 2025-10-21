@@ -19,6 +19,7 @@ export type Atom<T> = Resource<T> & {
 export function withAtom<T>(initialValue?: T): Atom<T> {
   return QUON_CREATE_NODE<Atom<T>>(() => {
     let value: T | undefined = initialValue;
+    let isDisposing = false;
 
     const createFunctions: Set<(value: T) => void> = new Set();
     const deleteFunctions: Set<() => Promise<void>> = new Set();
@@ -30,12 +31,25 @@ export function withAtom<T>(initialValue?: T): Atom<T> {
     let currentContext = 0;
     async function set(newValue?: T) {
       const ctx = ++currentContext;
-      if (newValue === value) return;
-      if (value !== undefined) {
-        await Promise.all(Array.from(deleteFunctions).map(fn => fn()));
+      if (newValue === value) {
+        return;
       }
-      if (ctx !== currentContext) return;
+      isDisposing = true;
+
+      // DELETE の完了を待つ
+      if (value !== undefined) {
+        await Promise.all([...deleteFunctions].map(fn => fn()));
+      }
+
+      if (ctx !== currentContext) {
+        return;
+      }
+      isDisposing = false;
+
+      // 値を更新
       value = newValue;
+
+      // CREATE を enqueue
       if (newValue !== undefined) {
         createFunctions.forEach(fn => fn(newValue));
       }
@@ -49,7 +63,7 @@ export function withAtom<T>(initialValue?: T): Atom<T> {
           createFunctions.delete(createFn);
           deleteFunctions.delete(deleteFn);
         };
-        if (value !== undefined) {
+        if (value !== undefined && !isDisposing) {
           return {
             type: 'value' as const,
             disposer,
@@ -75,35 +89,6 @@ export function withAtom<T>(initialValue?: T): Atom<T> {
       value: atom,
     };
   });
-}
-
-export function withResource<T>(initRoutine: () => T): Resource<T> {
-  const atom = withAtom<T>();
-
-  const internalRoutine = QUON_CREATE_NODE<() => void>(() => {
-    const internalRoutine = () => {
-      const v = initRoutine();
-      QUON_CREATE_NODE<void>(() => {
-        atom.set(v);
-        return {
-          type: 'value' as const,
-          disposer: async () => {
-            atom.set(undefined);
-          },
-          value: undefined,
-        };
-      });
-    };
-    return {
-      type: 'value' as const,
-      disposer: async () => {},
-      value: internalRoutine,
-    };
-  });
-
-  QUON_RUN_ROUTINE_INTERNAL(internalRoutine);
-
-  return atom;
 }
 
 export function withExternal<T>(
@@ -149,6 +134,30 @@ export function withExternal<T>(
     }
   });
 }
+export function withResource<T>(initRoutine: () => T): Resource<T> {
+  const atom = withAtom<T>();
+
+  const internalRoutine = QUON_CREATE_NODE<() => void>(() => {
+    const internalRoutine = () => {
+      const v = initRoutine();
+      withExternal(addDisposer => {
+        addDisposer(async () => {
+          await atom.set(undefined);
+        });
+        atom.set(v);
+      });
+    };
+    return {
+      type: 'value' as const,
+      disposer: async () => {},
+      value: internalRoutine,
+    };
+  });
+
+  QUON_RUN_ROUTINE_INTERNAL(internalRoutine);
+
+  return atom;
+}
 
 export const withWait = (intervalMs: number): void => {
   withExternal(async addDisposer => {
@@ -169,4 +178,23 @@ export const launchRoutine = (
 ): { exit: () => Promise<void> } => {
   const { cancel } = QUON_RUN_ROUTINE_EXTERNAL(routine);
   return { exit: cancel };
+};
+
+export const fallback = <T, U>(
+  fallbackValue: U,
+  resource: Resource<T>
+): Resource<T | U> => {
+  const fallbackResource: Atom<T | U> = withAtom<T | U>(fallbackValue);
+
+  withResource(() => {
+    const value = resource();
+    withExternal(addDisposer => {
+      addDisposer(async () => {
+        await fallbackResource.set(fallbackValue);
+      });
+      fallbackResource.set(value);
+    });
+  });
+
+  return fallbackResource;
 };

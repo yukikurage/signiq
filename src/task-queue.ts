@@ -39,4 +39,9 @@ export class TaskQueue<Task> {
     }
     this.running = false;
   }
+
+  // キューに残っているタスクを取得
+  public getRemainingTasks(): readonly Task[] {
+    return this.queue.map((item) => item.task);
+  }
 }

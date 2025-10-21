@@ -118,6 +118,9 @@ type QUON_TASK =
     }
   | {
       type: 'CANCEL';
+    }
+  | {
+      type: 'NOOP';
     };
 
 const QUON_RUN_ROUTINE = (
@@ -126,6 +129,9 @@ const QUON_RUN_ROUTINE = (
 ) => {
   // Cancel フラグ
   let cancelFrag = false;
+
+  // 最後の DELETE の nodeId を記録（フィルタリング用）
+  let lastDeleteNodeId = -1;
 
   // task Queue
   const taskQueue = new TaskQueue<QUON_TASK>();
@@ -142,11 +148,26 @@ const QUON_RUN_ROUTINE = (
     targetNodeId: -1,
     // create node result
     createFunction(nodeId: number, result: QUON_NODE_RESULT) {
-      taskQueue.enqueue({ type: 'CREATE', nodeId, nodeResult: result });
+      // lastDeleteNodeId より大きい nodeId は無効なので NOOP を積む
+      if (nodeId > lastDeleteNodeId) {
+        taskQueue.enqueue({ type: 'NOOP' });
+      } else {
+        taskQueue.enqueue({ type: 'CREATE', nodeId, nodeResult: result });
+      }
     },
     // delete node result
     async deleteFunction(nodeId: number) {
-      await taskQueue.enqueue({ type: 'DELETE', nodeId }); // このタスクが完了するまで待機
+      // lastDeleteNodeId を更新（より小さい値で）
+      if (nodeId < lastDeleteNodeId) {
+        lastDeleteNodeId = nodeId;
+      }
+
+      // lastDeleteNodeId より大きい nodeId は無効なので NOOP を積む
+      if (nodeId > lastDeleteNodeId) {
+        await taskQueue.enqueue({ type: 'NOOP' });
+      } else {
+        await taskQueue.enqueue({ type: 'DELETE', nodeId }); // このタスクが完了するまで待機
+      }
     },
     disposers: new Map(),
     userContext: { ...context },
@@ -182,6 +203,8 @@ const QUON_RUN_ROUTINE = (
       QUON_GLOBAL_ROUTINE_CONTEXT = tempContext;
       // 現在の targetId を更新
       quonContext.targetNodeId = quonContext.currentNodeId - 1;
+      // next が終わったら lastDeleteNodeId を target で初期化
+      lastDeleteNodeId = quonContext.targetNodeId;
     }
   }
 
@@ -190,6 +213,21 @@ const QUON_RUN_ROUTINE = (
     if (cancelFrag) return;
     // nodeId と 現在の targetNodeId が異なっていたなら無視する
     if (nodeId !== quonContext.targetNodeId) return;
+
+    // 次のタスクをチェック: CREATE n v の直後に DELETE m (m < n) がある場合スキップ
+    const remainingTasks = taskQueue.getRemainingTasks();
+    if (remainingTasks.length > 0) {
+      const nextTask = remainingTasks[0];
+      if (
+        nextTask &&
+        nextTask.type === 'DELETE' &&
+        'nodeId' in nextTask &&
+        nextTask.nodeId < nodeId
+      ) {
+        // この CREATE をスキップ (next で進めてから DELETE で戻ってくるのと同じ)
+        return;
+      }
+    }
 
     // node result をセットして next() を実行
     quonContext.targetNodeResult = nodeResult;
@@ -228,6 +266,9 @@ const QUON_RUN_ROUTINE = (
         break;
       case 'CANCEL':
         await handleCancel();
+        break;
+      case 'NOOP':
+        // NOOP タスクは何もせずに即座に完了
         break;
     }
   }
