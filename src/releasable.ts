@@ -6,7 +6,7 @@ export namespace Releasable {
   export function parallel(set: Iterable<Releasable>): Releasable {
     return {
       release: async () => {
-        await Promise.all([...set].map(r => r.release()));
+        await Promise.allSettled([...set].map(r => r.release()));
       },
     };
   }

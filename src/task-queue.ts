@@ -49,7 +49,7 @@ export class TaskQueue<Task> {
     }
   }
 
-  private async run() {
+  private run() {
     if (this.running || !this.handler || this.stopped) return;
     this.running = true;
 
@@ -65,11 +65,14 @@ export class TaskQueue<Task> {
           reject(err);
         }
       }
-    })();
+      this.running = false;
+      this.runningPromise = null;
 
-    await this.runningPromise;
-    this.running = false;
-    this.runningPromise = null;
+      // 処理中に新しいタスクが追加されたかチェック
+      if (this.queue.length > 0 && !this.stopped) {
+        this.run();
+      }
+    })();
   }
 
   // キューに残っているタスクを取得
