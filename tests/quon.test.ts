@@ -3,9 +3,16 @@ import assert from 'node:assert';
 import { LogCapture } from './test-utils';
 import { Quon } from '../src';
 
-const useLog = (logs: LogCapture, label: string) =>
-  Quon.useEffect(() => {
+const useLog = (logs: LogCapture, label: string, releaseLabel?: string) =>
+  Quon.useEffect(addRelease => {
     logs.log(`${label}`);
+    if (releaseLabel) {
+      addRelease({
+        release: async () => {
+          logs.log(`${releaseLabel}`);
+        },
+      });
+    }
   });
 
 describe('Blueprint basic functionality', () => {
@@ -66,8 +73,8 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [valueStore, setValue] = Quon.useState(0);
-        Quon.instantiate(() => {
+        const [valueStore, setValue] = Quon.useStore(0);
+        Quon.useInstance(() => {
           useLog(logs, `value: ${valueStore.use()}`);
         });
 
@@ -98,13 +105,65 @@ describe('Blueprint basic functionality', () => {
       await store.release();
     });
 
+    it('should create a portal and update values', async () => {
+      const logs = new LogCapture();
+
+      const blueprint = () => {
+        const [valueStore, useValuePortal] = Quon.usePortal();
+
+        const [refetchStore, setRefetch] = Quon.useStore<number>(0);
+
+        Quon.useInstance(() => {
+          const value = valueStore.use();
+          useLog(logs, `created: ${value}`, `released: ${value}`);
+        });
+
+        Quon.useInstance(() => {
+          const refetch = refetchStore.use();
+          useValuePortal(refetch);
+        });
+
+        Quon.useInstance(() => {
+          const refetch = refetchStore.use();
+          Quon.useTimeout(10);
+          useValuePortal(refetch + 100);
+        });
+
+        Quon.useTimeout(20);
+        Quon.useEffect(async () => await setRefetch(5));
+
+        Quon.useTimeout(20);
+        Quon.useEffect(async () => await setRefetch(10));
+      };
+
+      const store = Quon.instantiate(blueprint);
+
+      // 初期値
+      await new Promise(resolve => setTimeout(resolve, 60));
+      let result = logs.expect([
+        'created: 0',
+        'created: 100',
+        'released: 0',
+        'released: 100',
+        'created: 5',
+        'created: 105',
+        'released: 5',
+        'released: 105',
+        'created: 10',
+        'created: 110',
+      ]);
+      assert.strictEqual(result.passed, true, result.message);
+
+      await store.release();
+    });
+
     it('should skip duplicate values in channel', async () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [valueStore, setValue] = Quon.useState(1);
+        const [valueStore, setValue] = Quon.useStore(1);
 
-        Quon.instantiate(() => {
+        Quon.useInstance(() => {
           useLog(logs, `value: ${valueStore.use()}`);
         });
 
@@ -133,10 +192,10 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [value1Store, setValue1] = Quon.useState(0);
-        const [value2Store, setValue2] = Quon.useState(100);
+        const [value1Store, setValue1] = Quon.useStore(0);
+        const [value2Store, setValue2] = Quon.useStore(100);
 
-        Quon.instantiate(() => {
+        Quon.useInstance(() => {
           // Depends 1st state
           useLog(logs, `value1: ${value1Store.use()}`);
           Quon.useTimeout(20);
@@ -172,6 +231,46 @@ describe('Blueprint basic functionality', () => {
         'value2: 100',
         'value2: 200',
       ]);
+      assert.strictEqual(result.passed, true, result.message);
+
+      await store.release();
+    });
+  });
+
+  describe('Blueprint context functionality', () => {
+    it('should use context properly', async () => {
+      const logs = new LogCapture();
+
+      const counterCtx = Quon.createContext<{
+        count: Quon.Store<number>;
+        setCount: (value: number) => Promise<void>;
+      }>();
+
+      const blueprint = () => {
+        const [count, setCount] = Quon.useStore(0);
+        counterCtx.useProvider({ count, setCount });
+
+        Quon.useInstance(() => {
+          const counter = counterCtx.useConsumer();
+          useLog(logs, `count: ${counter.count.use()}`);
+        });
+
+        Quon.useInstance(() => {
+          const counter = counterCtx.useConsumer();
+          Quon.useTimeout(20);
+          Quon.useEffect(async () => await counter.setCount(1));
+          Quon.useTimeout(20);
+          Quon.useEffect(async () => await counter.setCount(2));
+        });
+
+        Quon.useTimeout(60);
+      };
+
+      const store = Quon.instantiate(blueprint);
+
+      // 2回目の更新
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const result = logs.expect(['count: 0', 'count: 1', 'count: 2']);
       assert.strictEqual(result.passed, true, result.message);
 
       await store.release();

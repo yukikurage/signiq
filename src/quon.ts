@@ -1,89 +1,92 @@
 import { BiLinkMap } from './bilink-map';
 import { Observable } from './observable';
 import { Queue } from './queue';
-import { Releasable } from './releasable';
+import { CompositeReleasable, Releasable } from './releasable';
 import { TaskQueue } from './task-queue';
 
 interface ValueInfo<T> extends Releasable {
   value: T;
 }
 
-/**
- * 値を貯めておく場所
- * 単純にみると Observable -> Observable の変換であるが、
- * 渡された値の Observable の observe 関数を一度のみ呼び出し、
- * その返り値を使って新しい値の Observable を構築するという点で特殊。
- * いろいろな場所で使いまわされる Observable をメモ化し、初期化処理を一回のみに変える
- * また、現在保持している値の一覧を取得できる
- */
-export class Store<T> implements Releasable, Observable<T> {
-  private bindings = new BiLinkMap<
-    ValueInfo<T>,
-    (value: T) => Releasable,
-    Releasable
-  >();
-  private values = new Set<ValueInfo<T>>();
-  private observers = new Set<(value: T) => Releasable>();
-  private releaseThis: Releasable;
-  private released = false;
+export namespace Quon {
+  /**
+   * 値を貯めておく場所
+   * 単純にみると Observable -> Observable の変換であるが、
+   * 渡された値の Observable の observe 関数を一度のみ呼び出し、
+   * その返り値を使って新しい値の Observable を構築するという点で特殊。
+   * いろいろな場所で使いまわされる Observable をメモ化し、初期化処理を一回のみに変える
+   * また、現在保持している値の一覧を取得できる
+   */
+  export class Store<T> implements Releasable, Observable<T> {
+    private bindings = new BiLinkMap<
+      ValueInfo<T>,
+      (value: T) => Releasable,
+      Releasable
+    >();
+    private values = new Set<ValueInfo<T>>();
+    private observers = new Set<(value: T) => Releasable>();
+    private releaseThis: Releasable;
+    private released = false;
 
-  constructor(observable: Observable<T>) {
-    this.releaseThis = observable.observe(this.create.bind(this));
-  }
+    constructor(observable: Observable<T>) {
+      this.releaseThis = observable.observe(this.create.bind(this));
+    }
 
-  private create(value: T): Releasable {
-    const v: ValueInfo<T> = {
-      value,
-      release: async () => {
-        this.values.delete(v);
-        await this.bindings.unlinkAllA(v);
-      },
-    };
-    this.values.add(v);
-    // すでに存在する observer 全員に対してリンクを貼る
-    [...this.observers].forEach(o => {
-      const link = o(value);
-      this.bindings.link(v, o, link);
-    });
-    return v;
-  }
+    private create(value: T): Releasable {
+      const v: ValueInfo<T> = {
+        value,
+        release: async () => {
+          this.values.delete(v);
+          await this.bindings.unlinkAllA(v);
+        },
+      };
+      this.values.add(v);
+      // すでに存在する observer 全員に対してリンクを貼る
+      [...this.observers].forEach(o => {
+        const link = o(value);
+        this.bindings.link(v, o, link);
+      });
+      return v;
+    }
 
-  public peek(): Iterable<T> {
-    return [...this.values].map(v => v.value);
-  }
+    public peek(): Iterable<T> {
+      return [...this.values].map(v => v.value);
+    }
 
-  public observe(observer: (value: T) => Releasable): Releasable {
-    this.observers.add(observer);
-    // すでに存在する値全員に対してリンクを貼る
-    [...this.values].forEach(v => {
-      const link = observer(v.value);
-      this.bindings.link(v, observer, link);
-    });
-    return {
-      release: async () => {
-        this.observers.delete(observer);
-        await this.bindings.unlinkAllB(observer);
-      },
-    };
-  }
+    public observe(observer: (value: T) => Releasable): Releasable {
+      this.observers.add(observer);
+      // すでに存在する値全員に対してリンクを貼る
+      [...this.values].forEach(v => {
+        const link = observer(v.value);
+        this.bindings.link(v, observer, link);
+      });
+      return {
+        release: async () => {
+          this.observers.delete(observer);
+          await this.bindings.unlinkAllB(observer);
+        },
+      };
+    }
 
-  public async release(): Promise<void> {
-    if (this.released) return;
-    this.released = true;
-    await this.releaseThis.release();
-    // releaseThis　は全ての Link を解除していると期待されるが、念のためこちらでも解除しておく
-    await this.bindings.unlinkAll();
-  }
+    public async release(): Promise<void> {
+      if (this.released) return;
+      this.released = true;
+      await this.releaseThis.release();
+      // releaseThis　は全ての Link を解除していると期待されるが、念のためこちらでも解除しておく
+      await this.bindings.unlinkAll();
+    }
 
-  public use(): T {
-    return Quon.useObservable(this);
+    public use(): T {
+      return Quon.useObservable(this);
+    }
   }
 }
 
 type ObservableResult = any;
 
 type BLUEPRINT_GLOBAL_CONTEXT_TYPE = {
-  use<T>(blueprint: Observable<T>): T;
+  use<T>(observable: Observable<T>): T;
+  getUserCtx(): Record<symbol, ObservableResult>;
 };
 
 let BLUEPRINT_GLOBAL_CONTEXT: BLUEPRINT_GLOBAL_CONTEXT_TYPE | undefined =
@@ -97,6 +100,50 @@ class StoreChainException<U, T> {
 }
 
 export namespace Quon {
+  export type Context<T> = {
+    key: symbol;
+    useProvider(value: T): void;
+    useConsumer(): T;
+  };
+
+  export function createContext<T>(): Context<T> {
+    return {
+      key: Symbol('Quon.Context'),
+      useProvider(value: T): void {
+        const global = BLUEPRINT_GLOBAL_CONTEXT;
+        if (global === undefined) {
+          throw new Error(
+            'Quon.Context.useProvider must be called within Quon.launch'
+          );
+        }
+        useObservable(
+          Observable.make<void>(create => {
+            global.getUserCtx()[this.key] = value;
+            return Releasable.sequential([
+              create(undefined),
+              {
+                release: async () => {
+                  delete global.getUserCtx()[this.key];
+                },
+              },
+            ]);
+          })
+        );
+      },
+      useConsumer(): T {
+        const global = BLUEPRINT_GLOBAL_CONTEXT;
+        if (global === undefined) {
+          throw new Error('Quon.Context.use must be called within Quon.launch');
+        }
+        const value = global.getUserCtx()[this.key];
+        if (value === undefined) {
+          throw new Error('No context value provided');
+        }
+        return value as T;
+      },
+    };
+  }
+
   export function useObservable<T>(observable: Observable<T>): T {
     const global = BLUEPRINT_GLOBAL_CONTEXT;
     if (global === undefined) {
@@ -106,7 +153,12 @@ export namespace Quon {
     return global.use(observable);
   }
 
-  function launch<T>(blueprint: () => T): Observable<T> {
+  export function instantiate<T>(
+    blueprint: () => T,
+    userCtx?: Record<symbol, ObservableResult>
+  ): Store<T> {
+    const initialUserCtx = userCtx ?? {};
+
     // 履歴と一緒に Blueprint を実行する
     function runBlueprintWithHistory(
       history: Queue<ObservableResult>
@@ -135,7 +187,10 @@ export namespace Quon {
 
       // Blueprint の実行
       const temp = BLUEPRINT_GLOBAL_CONTEXT;
-      BLUEPRINT_GLOBAL_CONTEXT = { use };
+      BLUEPRINT_GLOBAL_CONTEXT = {
+        use,
+        getUserCtx: () => initialUserCtx,
+      };
       try {
         const result = blueprint();
         BLUEPRINT_GLOBAL_CONTEXT = temp;
@@ -161,24 +216,28 @@ export namespace Quon {
       }
     }
 
-    return runBlueprintWithHistory(Queue.empty());
+    return new Store(runBlueprintWithHistory(Queue.empty()));
   }
 
   /**
    * Blueprint をインスタンス化する。
    * Blueprint 内で呼ばれたならその Blueprint を親とする
-   * Blueprint 外で呼ばれたなら独立した Store を作成する
+   * Blueprint 外で呼ばれたなら独立した Store を作成する (非推奨 : instantiate を直接使う)
    */
-  export function instantiate<T>(blueprint: () => T): Store<T> {
+  export function useInstance<T>(blueprint: () => T): Store<T> {
     const global = BLUEPRINT_GLOBAL_CONTEXT;
     if (global === undefined) {
+      console.warn(
+        'Warning: Quon.useInstance called outside of Quon.launch. This usage is deprecated. Please use Quon.instantiate directly instead.'
+      );
       // Blueprint 外で呼ばれた場合: 独立した Store を作成
-      return new Store(launch(blueprint));
+      return instantiate(blueprint);
     } else {
+      const { ...parentUserCtx } = global.getUserCtx();
       return Quon.useObservable(
         Observable.make<Store<T>>(create => {
           // Blueprint を実行
-          const innerStore = new Store(launch(blueprint));
+          const innerStore = instantiate(blueprint, parentUserCtx);
           const releaseValue = create(innerStore);
 
           // innerStore を observe
@@ -192,7 +251,7 @@ export namespace Quon {
     return Quon.useObservable(Observable.never());
   }
 
-  export function useState<T>(
+  export function useStore<T>(
     initialValue: T
   ): [Store<T>, (newValue: T) => Promise<void>] {
     return Quon.useObservable(
@@ -203,7 +262,8 @@ export namespace Quon {
         const innerStore = new Store<T>(
           Observable.make<T>(observer => {
             let currentValue: T = initialValue;
-            let currentReleasable: Releasable = observer(initialValue);
+            const valueReleasable = new CompositeReleasable();
+            valueReleasable.add(observer(initialValue));
 
             // Launch Tasks
             const releaseTaskProcess = tasks.launch(async task => {
@@ -214,20 +274,13 @@ export namespace Quon {
                 return;
               } else {
                 // Release previous value
-                await currentReleasable.release();
+                await valueReleasable.release();
                 // Create new value
                 currentValue = task;
-                currentReleasable = observer(currentValue);
+                valueReleasable.add(observer(currentValue));
               }
             });
-            return Releasable.parallel([
-              releaseTaskProcess,
-              {
-                release: async () => {
-                  await currentReleasable.release();
-                },
-              },
-            ]);
+            return Releasable.parallel([releaseTaskProcess, valueReleasable]);
           })
         );
 
@@ -239,6 +292,42 @@ export namespace Quon {
         ]);
 
         return Releasable.parallel([innerStore, releaseValue]);
+      })
+    );
+  }
+
+  /**
+   * 任意の場所から値を更新できる。
+   * 返り値の関数は Quon Blueprint である。したがって、Blueprint 内でのみ呼ぶことができる。
+   * Blueprint で呼び出した場合、値のセット / 消去が登録される。
+   * 複数の箇所で使用した場合複数の値が同時に属する。
+   */
+  export function usePortal<T>(): [Store<T>, (newValue: T) => void] {
+    return Quon.useObservable(
+      Observable.make<[Store<T>, (newValue: T) => void]>(create => {
+        let innerCreateTunnel: (value: T) => Releasable;
+
+        const innerStore: Store<T> = new Store<T>(
+          Observable.make<T>(observer => {
+            innerCreateTunnel = observer;
+            return Releasable.noop;
+          })
+        );
+
+        const releaseValue = create([
+          innerStore,
+          (value: T) => {
+            // 値を追加
+            useObservable(
+              Observable.make<void>(create => {
+                const releasable = innerCreateTunnel(value);
+                return Releasable.sequential([create(undefined), releasable]);
+              })
+            );
+          },
+        ]);
+
+        return Releasable.sequential([releaseValue, innerStore]);
       })
     );
   }
@@ -277,7 +366,7 @@ export namespace Quon {
       Observable.make(create => {
         const abortController = new AbortController();
         const releasables: Releasable[] = [];
-        let releaseValue: Releasable = Releasable.noop;
+        const valueReleasable = new CompositeReleasable();
 
         // Start async operation
         const makerResult = maker((r: Releasable) => {
@@ -288,7 +377,7 @@ export namespace Quon {
           makerResult
             .then(value => {
               if (!abortController.signal.aborted) {
-                releaseValue = create(value);
+                valueReleasable.add(create(value));
               }
             })
             .catch(err => {
@@ -296,21 +385,19 @@ export namespace Quon {
             });
         } else {
           if (!abortController.signal.aborted) {
-            releaseValue = create(makerResult);
+            valueReleasable.add(create(makerResult));
           }
         }
 
-        return {
-          release: async () => {
-            await releaseValue.release();
-            // Abort async operation
-            abortController.abort();
-            // Release all collected releasables (reverse order)
-            for (const r of [...releasables].reverse()) {
-              await r.release();
-            }
+        return Releasable.sequential([
+          valueReleasable,
+          {
+            release: async () => {
+              abortController.abort();
+            },
           },
-        };
+          ...releasables,
+        ]);
       })
     );
   }
@@ -318,9 +405,9 @@ export namespace Quon {
   export function useTimeout(delayMs: number): void {
     return Quon.useObservable(
       Observable.make(create => {
-        let releaseValue: Releasable = Releasable.noop;
+        const valueReleasable = new CompositeReleasable();
         const timeout = setTimeout(() => {
-          releaseValue = create(undefined);
+          valueReleasable.add(create(undefined));
         }, delayMs);
         return Releasable.parallel([
           {
@@ -328,11 +415,7 @@ export namespace Quon {
               clearTimeout(timeout);
             },
           },
-          {
-            release: async () => {
-              await releaseValue.release();
-            },
-          },
+          valueReleasable,
         ]);
       })
     );
