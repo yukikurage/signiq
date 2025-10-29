@@ -271,6 +271,7 @@ Resources that need cleanup:
 ## Common Pitfalls
 
 1. ❌ **Don't catch exceptions around `.use()` calls**
+
    ```typescript
    // BAD - breaks Blueprint control flow
    try {
@@ -280,22 +281,25 @@ Resources that need cleanup:
    }
    ```
 
-2. ❌ **Don't call `useX` inside conditionals that depend on reactive values**
+2. ❌ **Don't call `useX` inside conditionals that depend on mutable values**
+
    ```typescript
    // BAD - if depends on reactive value
-   const reactiveValue = someObservable.use();
-   if (reactiveValue > 5) {
+   let mutableValue = 0;
+   // ... somewhere else, mutableValue changes ...
+   if (mutableValue > 5) {
      const value = observable.use(); // Wrong!
    }
 
    // OK - if depends on const value
-   const constValue = 10;
+   const constValue = reactiveValue.use();
    if (constValue > 5) {
      const value = observable.use(); // This is fine
    }
    ```
 
 3. ❌ **Don't forget to call `release()`**
+
    ```typescript
    const store = Store.fromBlueprint(myApp);
    // ... use store ...
