@@ -2,6 +2,14 @@ export interface Releasable {
   release(): Promise<void>;
 }
 
+export class BasicReleasable implements Releasable {
+  constructor(private onRelease: () => Promise<void>) {}
+
+  public async release(): Promise<void> {
+    await this.onRelease();
+  }
+}
+
 export class CompositeReleasable implements Releasable {
   private releasables: Releasable[] = [];
 
@@ -25,6 +33,7 @@ export namespace Releasable {
       },
     };
   }
+
   export function sequential(set: Iterable<Releasable>): Releasable {
     return {
       release: async () => {
@@ -34,5 +43,6 @@ export namespace Releasable {
       },
     };
   }
+
   export const noop: Releasable = { release: async () => {} };
 }
