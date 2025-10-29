@@ -90,11 +90,26 @@ type BLUEPRINT_GLOBAL_CONTEXT_TYPE = {
 let BLUEPRINT_GLOBAL_CONTEXT: BLUEPRINT_GLOBAL_CONTEXT_TYPE | undefined =
   undefined;
 
+// Unique symbol to identify BlueprintChainException and prevent accidental catching
+const BLUEPRINT_CHAIN_EXCEPTION_SYMBOL = Symbol('BlueprintChainException');
+
 class BlueprintChainException<U, T> {
+  // Add a unique symbol property to identify this as a Blueprint control flow exception
+  public readonly [BLUEPRINT_CHAIN_EXCEPTION_SYMBOL] = true;
+
   constructor(
     public readonly observable: Observable<U>,
     public readonly continuation: (value: U) => Observable<T>
   ) {}
+
+  // Helper to check if an error is a BlueprintChainException
+  static isBlueprintChainException(error: unknown): error is BlueprintChainException<any, any> {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      BLUEPRINT_CHAIN_EXCEPTION_SYMBOL in error
+    );
+  }
 }
 
 export namespace Blueprint {
@@ -108,7 +123,8 @@ export namespace Blueprint {
     const global = BLUEPRINT_GLOBAL_CONTEXT;
     if (global === undefined) {
       throw new Error(
-        'Quon.Context.getBlueprintGlobalContext must be called within Quon.launch'
+        'Blueprint context access outside of Blueprint execution. ' +
+          'Make sure to call this function only within a Blueprint (inside Blueprint.toObservable or Store.fromBlueprint).'
       );
     }
     return global;
@@ -136,8 +152,16 @@ export namespace Blueprint {
     const global = getBlueprintGlobalContext();
     const value = global.getUserCtx()[key];
     if (value === undefined) {
-      throw new Error('No context value provided');
+      const keyDescription = key.description || '<anonymous>';
+      throw new Error(
+        `No context value provided for key: ${keyDescription}. ` +
+          'Make sure a parent Blueprint called useProvider() for this context.'
+      );
     }
+    // Type assertion is safe here because:
+    // 1. The context key is type-branded (created by createContext<T>())
+    // 2. The value is set by useProvider() with the correct type
+    // 3. The symbol key ensures type consistency at compile time
     return value as T;
   }
 
@@ -205,11 +229,13 @@ export namespace Blueprint {
         return Observable.pure(result);
       } catch (e) {
         BLUEPRINT_GLOBAL_CONTEXT = temp;
-        if (e instanceof BlueprintChainException) {
+        if (BlueprintChainException.isBlueprintChainException(e)) {
           // Chain 例外をキャッチ: Observable と 継続をチェイン
           // observe に継続を登録する
           return e.observable.flatMap(e.continuation);
         }
+        // If user code caught and re-threw a BlueprintChainException,
+        // or if this is a genuine user error, re-throw it
         throw e;
       }
     }
@@ -270,7 +296,18 @@ export namespace Blueprint {
             }
           })
           .catch(err => {
-            // Ignore errors
+            // Log error to help with debugging
+            if (!abortController.signal.aborted) {
+              console.error(
+                'Error in Blueprint.useEffect:',
+                err instanceof Error ? err.message : err
+              );
+              if (err instanceof Error && err.stack) {
+                console.error('Stack trace:', err.stack);
+              }
+            }
+            // Note: Errors are logged but not propagated to avoid breaking the Observable chain
+            // Users should handle errors within their maker function if they need custom error handling
           });
       } else {
         if (!abortController.signal.aborted) {

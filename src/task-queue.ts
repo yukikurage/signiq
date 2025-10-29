@@ -1,28 +1,33 @@
 import type { Releasable } from './releasable';
 
-export class TaskQueue<Task> {
+export class TaskQueue<Task, Result = void> {
   private queue: Array<{
     task: Task;
-    resolve: (value: any) => void;
-    reject: (reason?: any) => void;
+    resolve: (value: Result) => void;
+    reject: (reason?: unknown) => void;
   }> = [];
 
   private running = false;
   private launched = false;
   private stopped = false;
-  private handler: ((task: Task) => Promise<any>) | null = null;
+  private handler: ((task: Task) => Promise<Result>) | null = null;
   private runningPromise: Promise<void> | null = null;
 
   // タスクを登録
-  public enqueue(task: Task) {
-    return new Promise((resolve, reject) => {
+  public enqueue(task: Task): Promise<Result> {
+    return new Promise<Result>((resolve, reject) => {
+      // Check if stopped before enqueueing to prevent hanging promises
+      if (this.stopped) {
+        reject(new Error('TaskQueue is stopped'));
+        return;
+      }
       this.queue.push({ task, resolve, reject });
       if (this.launched) this.run();
     });
   }
 
   // 後からハンドラを設定して起動
-  public launch(handler: (task: Task) => Promise<any>): Releasable {
+  public launch(handler: (task: Task) => Promise<Result>): Releasable {
     this.handler = handler;
     this.launched = true;
     this.stopped = false;

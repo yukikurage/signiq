@@ -12,7 +12,13 @@ export class BiLinkMap<A, B, L extends Releasable> {
     return this.bToA.keys();
   }
 
-  link(a: A, b: B, link: L): void {
+  async link(a: A, b: B, link: L): Promise<void> {
+    // Release existing link if it exists to prevent memory leaks
+    const existingLink = this.aToB.get(a)?.get(b);
+    if (existingLink) {
+      await existingLink.release();
+    }
+
     (this.aToB.get(a) ?? this.aToB.set(a, new Map()).get(a)!).set(b, link);
     (this.bToA.get(b) ?? this.bToA.set(b, new Map()).get(b)!).set(a, link);
   }

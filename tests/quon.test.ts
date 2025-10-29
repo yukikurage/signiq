@@ -276,4 +276,74 @@ describe('Blueprint basic functionality', () => {
       await store.release();
     });
   });
+
+  describe('Blueprint error handling', () => {
+    it('should handle async errors in useEffect and log them', async () => {
+      const errors: string[] = [];
+
+      // Capture console.error
+      const originalError = console.error;
+      console.error = (...args: any[]) => {
+        errors.push(args.join(' '));
+      };
+
+      const blueprint = () => {
+        Blueprint.useEffect(async () => {
+          // Async error to test Promise rejection handling
+          await Promise.resolve();
+          throw new Error('Test async error in useEffect');
+        });
+      };
+
+      const store = Store.fromBlueprint(blueprint);
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Restore console.error
+      console.error = originalError;
+
+      // Check that error was logged
+      assert.ok(
+        errors.some(e => e.includes('Test async error in useEffect')),
+        'Async error should be logged'
+      );
+
+      await store.release();
+    });
+
+    it('should handle missing context and throw descriptive error', () => {
+      const testContext = Blueprint.createContext<number>();
+
+      const blueprint = () => {
+        return testContext.useConsumer();
+      };
+
+      try {
+        Blueprint.toObservable(blueprint);
+        assert.fail('Should have thrown an error');
+      } catch (e: any) {
+        assert.ok(e.message.includes('No context value provided'));
+      }
+    });
+  });
+
+  describe('Store resource management', () => {
+    it('should be safe to call release() multiple times', async () => {
+      const logs = new LogCapture();
+
+      const blueprint = () => {
+        useLog(logs, 'created');
+      };
+
+      const store = Store.fromBlueprint(blueprint);
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Call release multiple times - should be idempotent
+      await store.release();
+      await store.release();
+      await store.release();
+
+      const result = logs.expect(['created']);
+      assert.strictEqual(result.passed, true, result.message);
+    });
+  });
 });

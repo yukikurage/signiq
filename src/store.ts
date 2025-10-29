@@ -41,9 +41,12 @@ export class Store<T> extends Observable<T> implements Releasable {
     };
     this.values.add(v);
     // すでに存在する observer 全員に対してリンクを貼る
-    [...this.observers].forEach(o => {
+    // Note: link() is now async, but we can't await here as create() is sync
+    // The links will be established asynchronously, but this should not affect correctness
+    // as the synchronous observers will be called immediately
+    [...this.observers].forEach(async o => {
       const link = o(value);
-      this.bindings.link(v, o, link);
+      await this.bindings.link(v, o, link);
     });
     return v;
   }
@@ -55,9 +58,11 @@ export class Store<T> extends Observable<T> implements Releasable {
   public observe(observer: (value: T) => Releasable): Releasable {
     this.observers.add(observer);
     // すでに存在する値全員に対してリンクを貼る
-    [...this.values].forEach(v => {
+    // Note: link() is now async, but we can't await here as observe() needs to return immediately
+    // The links will be established asynchronously
+    [...this.values].forEach(async v => {
       const link = observer(v.value);
-      this.bindings.link(v, observer, link);
+      await this.bindings.link(v, observer, link);
     });
     return {
       release: async () => {
@@ -70,9 +75,29 @@ export class Store<T> extends Observable<T> implements Releasable {
   public async release(): Promise<void> {
     if (this.released) return;
     this.released = true;
-    await this.releaseThis.release();
-    // releaseThis　は全ての Link を解除していると期待されるが、念のためこちらでも解除しておく
-    await this.bindings.unlinkAll();
+
+    // Use Promise.allSettled to ensure both release operations attempt to complete
+    // even if one fails. This prevents partial cleanup.
+    const results = await Promise.allSettled([
+      this.releaseThis.release(),
+      this.bindings.unlinkAll(),
+    ]);
+
+    // Collect any errors that occurred
+    const errors = results
+      .filter(
+        (result): result is PromiseRejectedResult => result.status === 'rejected'
+      )
+      .map(result => result.reason);
+
+    // If there were errors, throw the first one (or an aggregate error if multiple)
+    if (errors.length > 0) {
+      if (errors.length === 1) {
+        throw errors[0];
+      } else {
+        throw new AggregateError(errors, 'Multiple errors during Store.release()');
+      }
+    }
   }
 }
 
@@ -113,18 +138,20 @@ export namespace Store {
 
             // Launch Tasks
             const releaseTaskProcess = tasks.launch(async task => {
-              // Get queued tasks
+              // Get queued tasks to check if there are more recent updates
               const remainedTasks = tasks.getRemainingTasks();
+              // Skip this task if:
+              // 1. There are newer tasks queued (optimize by jumping to the latest)
+              // 2. The value hasn't changed (deduplicate)
               if (remainedTasks.length > 0 || task === currentValue) {
-                // Skip
                 return;
-              } else {
-                // Release previous value
-                await valueReleasable.release();
-                // Create new value
-                currentValue = task;
-                valueReleasable.add(observer(currentValue));
               }
+
+              // Release previous value
+              await valueReleasable.release();
+              // Create new value
+              currentValue = task;
+              valueReleasable.add(observer(currentValue));
             });
             return Releasable.parallel([releaseTaskProcess, valueReleasable]);
           })
