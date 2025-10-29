@@ -8,12 +8,12 @@ interface ValueInfo<T> extends Releasable {
 }
 
 /**
- * 値を貯めておく場所
- * 単純にみると Observable -> Observable の変換であるが、
- * 渡された値の Observable の observe 関数を一度のみ呼び出し、
- * その返り値を使って新しい値の Observable を構築するという点で特殊。
- * いろいろな場所で使いまわされる Observable をメモ化し、初期化処理を一回のみに変える
- * また、現在保持している値の一覧を取得できる
+ * A place to store values
+ * Simply viewed as Observable -> Observable transformation, but special in that
+ * it calls the observe function of the passed Observable only once,
+ * and uses the return value to construct a new Observable of values.
+ * Memoizes Observables that are reused in various places, making initialization happen only once.
+ * Also allows retrieving a list of currently held values.
  */
 export class Store<T> extends Observable<T> implements Releasable {
   private bindings = new BiLinkMap<
@@ -40,7 +40,7 @@ export class Store<T> extends Observable<T> implements Releasable {
       },
     };
     this.values.add(v);
-    // すでに存在する observer 全員に対してリンクを貼る
+    // Link to all existing observers
     // Note: link() is now async, but we can't await here as create() is sync
     // The links will be established asynchronously, but this should not affect correctness
     // as the synchronous observers will be called immediately
@@ -57,7 +57,7 @@ export class Store<T> extends Observable<T> implements Releasable {
 
   public observe(observer: (value: T) => Releasable): Releasable {
     this.observers.add(observer);
-    // すでに存在する値全員に対してリンクを貼る
+    // Link to all existing values
     // Note: link() is now async, but we can't await here as observe() needs to return immediately
     // The links will be established asynchronously
     [...this.values].forEach(async v => {
@@ -103,9 +103,9 @@ export class Store<T> extends Observable<T> implements Releasable {
 
 export namespace Store {
   /**
-   * Blueprint をインスタンス化する。
-   * Blueprint 内で呼ばれたならその Blueprint を親とする
-   * Blueprint 外で呼ばれたなら独立した Store を作成する (非推奨 : instantiate を直接使う)
+   * Instantiate a Blueprint.
+   * If called within a Blueprint, that Blueprint becomes the parent
+   * If called outside a Blueprint, creates an independent Store (not recommended: use fromBlueprint directly)
    */
   export function useBlueprint<T>(blueprint: () => T): Store<T> {
     const userContext = Blueprint.useUserContext();
@@ -170,10 +170,10 @@ export namespace Store {
   }
 
   /**
-   * 任意の場所から値を更新できる。
-   * 返り値の関数は Quon Blueprint である。したがって、Blueprint 内でのみ呼ぶことができる。
-   * Blueprint で呼び出した場合、値のセット / 消去が登録される。
-   * 複数の箇所で使用した場合複数の値が同時に属する。
+   * Update values from any location.
+   * The returned function is a Quon Blueprint. Therefore, it can only be called within a Blueprint.
+   * When called in a Blueprint, value set/clear is registered.
+   * When used in multiple places, multiple values belong simultaneously.
    */
   export function usePortal<T>(): [Store<T>, (newValue: T) => void] {
     return new BasicObservable<[Store<T>, (newValue: T) => void]>(create => {
@@ -181,7 +181,7 @@ export namespace Store {
 
       const innerStore: Store<T> = new Store<T>(
         new BasicObservable<T>(observer => {
-          // Store constructor によって同期的に実行される
+          // Executed synchronously by Store constructor
           innerCreateTunnel = observer;
           return Releasable.noop;
         })
@@ -190,7 +190,7 @@ export namespace Store {
       const releaseValue = create([
         innerStore,
         (value: T) => {
-          // 値を追加
+          // Add value
           new BasicObservable(create => {
             const releasable = innerCreateTunnel(value);
             return Releasable.sequential([create(undefined), releasable]);

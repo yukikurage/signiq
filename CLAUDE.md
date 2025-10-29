@@ -32,9 +32,8 @@ This is a reactive programming library built around **Observable**, **Blueprint*
 - `src/releasable.ts`: Releasable interface and composition utilities
 - `src/bilink-map.ts`: Bidirectional map for managing Observer-Value relationships
 - `src/task-queue.ts`: Task queue for managing async operations
-- `src/queue.ts`: Persistent functional queue (Banker's Queue)
-- `src/linked-list.ts`: Persistent functional linked list
 - `src/index.ts`: Main entry point that exports all public APIs
+- `benchmarks/history-comparison.ts`: Performance comparison (Queue vs Array)
 
 ### Reactive System
 
@@ -150,7 +149,7 @@ Blueprints are synchronous-style functions that compose Observables. All `useX` 
 1. **Synchronous Blueprint execution**: Blueprints run synchronously until a `.use()` call
 2. **Exception-based control flow**: `BlueprintChainException` is thrown internally to implement continuations
 3. **Global context during Blueprint execution**: `BLUEPRINT_GLOBAL_CONTEXT` is set/restored synchronously
-4. **Persistent data structures**: Queue/LinkedList used for Blueprint history (structural sharing)
+4. **Array-based history**: Blueprint uses array copying for execution history (benchmarked 1.13x faster than persistent Queue/LinkedList)
 
 ## Code Style
 

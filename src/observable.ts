@@ -1,16 +1,16 @@
-import { Queue } from './queue';
 import { BasicReleasable, CompositeReleasable, Releasable } from './releasable';
 
 /**
- * 観測可能な値の集合
- * observe 関数を通じて値の追加を監視できる
- * observe 関数で得られた observation のリリース時には、作った値もすべて Release されることが期待される
+ * A collection of observable values
+ * Value additions can be monitored through the observe function
+ * When an observation obtained from the observe function is released,
+ * all created values are expected to be released as well
  */
 export abstract class Observable<T> {
   public abstract observe(observer: (value: T) => Releasable): Releasable;
 
   /**
-   * Blueprint で使用する
+   * Use within a Blueprint
    */
   public use(): T {
     return Blueprint.useObservable(this);
@@ -18,9 +18,9 @@ export abstract class Observable<T> {
 
   public flatMap<U>(f: (value: T) => Observable<U>): Observable<U> {
     return new BasicObservable<U>(create => {
-      // 親 Observable を observe
+      // Observe the parent Observable
       return this.observe(value => {
-        // 子を取得して observe
+        // Get and observe the child
         return f(value).observe(v => {
           return create(v);
         });
@@ -171,7 +171,7 @@ export namespace Blueprint {
   }
 
   /**
-   * コンテキストを作成
+   * Create a context
    */
   export function createContext<T>(): Context<T> {
     return {
@@ -191,33 +191,30 @@ export namespace Blueprint {
   ): Observable<T> {
     const initialUserCtx = userCtx ?? {};
 
-    // 履歴と一緒に Blueprint を実行する
-    function runBlueprintWithHistory(
-      history: Queue<BlueprintResult>
-    ): Observable<T> {
-      let currentHistory = history;
+    // Run Blueprint with history (Array-based implementation)
+    function runBlueprintWithHistory(history: BlueprintResult[]): Observable<T> {
+      let currentIndex = 0;
 
-      // Observable をチェインさせるための関数f
+      // Function to chain Observables
       function use<U>(observable: Observable<U>): U {
-        const dequeued = Queue.dequeue(currentHistory);
-
-        if (dequeued !== undefined) {
-          // 履歴がある場合: 履歴の値を返し、残りの履歴で続行
-          const { value, queue: remainingHistory } = dequeued;
-          currentHistory = remainingHistory;
+        if (currentIndex < history.length) {
+          // History available: return the historical value and advance index
+          const value = history[currentIndex];
+          currentIndex++;
           return value;
         } else {
-          // 履歴が枯渇した場合: 継続を作成して Store をチェイン
+          // History exhausted: create continuation and chain Observable
           const continuation = (v: U): Observable<T> => {
-            return runBlueprintWithHistory(Queue.enqueue(history, v));
+            // Array approach: copy array and append new value
+            return runBlueprintWithHistory([...history, v]);
           };
 
-          // 例外を throw して外側で Store を返す
+          // Throw exception to return Observable from outer scope
           throw new BlueprintChainException<U, T>(observable, continuation);
         }
       }
 
-      // Blueprint の実行
+      // Execute the Blueprint
       const temp = BLUEPRINT_GLOBAL_CONTEXT;
       BLUEPRINT_GLOBAL_CONTEXT = {
         use,
@@ -230,8 +227,7 @@ export namespace Blueprint {
       } catch (e) {
         BLUEPRINT_GLOBAL_CONTEXT = temp;
         if (BlueprintChainException.isBlueprintChainException(e)) {
-          // Chain 例外をキャッチ: Observable と 継続をチェイン
-          // observe に継続を登録する
+          // Catch Chain exception: chain Observable with continuation
           return e.observable.flatMap(e.continuation);
         }
         // If user code caught and re-threw a BlueprintChainException,
@@ -240,7 +236,7 @@ export namespace Blueprint {
       }
     }
 
-    return runBlueprintWithHistory(Queue.empty());
+    return runBlueprintWithHistory([]);
   }
 
   export function useObservable<T>(observable: Observable<T>): T {

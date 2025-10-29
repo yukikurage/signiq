@@ -13,7 +13,7 @@ export class TaskQueue<Task, Result = void> {
   private handler: ((task: Task) => Promise<Result>) | null = null;
   private runningPromise: Promise<void> | null = null;
 
-  // タスクを登録
+  // Register a task
   public enqueue(task: Task): Promise<Result> {
     return new Promise<Result>((resolve, reject) => {
       // Check if stopped before enqueueing to prevent hanging promises
@@ -26,7 +26,7 @@ export class TaskQueue<Task, Result = void> {
     });
   }
 
-  // 後からハンドラを設定して起動
+  // Set handler later and launch
   public launch(handler: (task: Task) => Promise<Result>): Releasable {
     this.handler = handler;
     this.launched = true;
@@ -39,16 +39,16 @@ export class TaskQueue<Task, Result = void> {
     };
   }
 
-  // TaskQueueを停止
+  // Stop the TaskQueue
   private async stop(): Promise<void> {
     this.stopped = true;
     this.launched = false;
-    // 残りのタスクを全てrejectする
+    // Reject all remaining tasks
     while (this.queue.length > 0) {
       const item = this.queue.shift()!;
       item.reject(new Error('TaskQueue stopped'));
     }
-    // 実行中のタスクが完了するまで待機
+    // Wait until the running task completes
     if (this.runningPromise) {
       await this.runningPromise;
     }
@@ -58,7 +58,7 @@ export class TaskQueue<Task, Result = void> {
     if (this.running || !this.handler || this.stopped) return;
     this.running = true;
 
-    // 実行中のプロミスを設定
+    // Set the running promise
     this.runningPromise = (async () => {
       while (this.queue.length > 0 && !this.stopped) {
         const item = this.queue.shift()!;
@@ -73,14 +73,14 @@ export class TaskQueue<Task, Result = void> {
       this.running = false;
       this.runningPromise = null;
 
-      // 処理中に新しいタスクが追加されたかチェック
+      // Check if new tasks were added during processing
       if (this.queue.length > 0 && !this.stopped) {
         this.run();
       }
     })();
   }
 
-  // キューに残っているタスクを取得
+  // Get tasks remaining in the queue
   public getRemainingTasks(): readonly Task[] {
     return this.queue.map(item => item.task);
   }

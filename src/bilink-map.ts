@@ -23,7 +23,7 @@ export class BiLinkMap<A, B, L extends Releasable> {
     (this.bToA.get(b) ?? this.bToA.set(b, new Map()).get(b)!).set(a, link);
   }
 
-  /** A と B のリンクを解除する */
+  /** Unlink A and B */
   async unlink(a: A, b: B): Promise<void> {
     const link = this.aToB.get(a)?.get(b);
     if (!link) return;
@@ -32,12 +32,12 @@ export class BiLinkMap<A, B, L extends Releasable> {
     await link.release();
   }
 
-  /** A に紐づく全てのリンクを解除する */
+  /** Unlink all links associated with A */
   async unlinkAllA(a: A): Promise<void> {
     const bs = this.aToB.get(a);
     if (!bs) return;
 
-    // b側からも消しつつ、すべて並列に release
+    // Delete from B side as well, and release all in parallel
     await Promise.all(
       [...bs].map(async ([b, link]) => {
         this.bToA.get(b)?.delete(a);
@@ -48,7 +48,7 @@ export class BiLinkMap<A, B, L extends Releasable> {
     this.aToB.delete(a);
   }
 
-  /** B に紐づく全てのリンクを解除する */
+  /** Unlink all links associated with B */
   async unlinkAllB(b: B): Promise<void> {
     const as = this.bToA.get(b);
     if (!as) return;
@@ -63,7 +63,7 @@ export class BiLinkMap<A, B, L extends Releasable> {
     this.bToA.delete(b);
   }
 
-  /** 全てのリンクを解除してクリアする */
+  /** Unlink and clear all links */
   async unlinkAll(): Promise<void> {
     const allLinks: L[] = [];
     for (const [, inner] of this.aToB) {
