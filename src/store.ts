@@ -1,5 +1,5 @@
 import { BiLinkMap } from './bilink-map';
-import { BasicObservable, Observable } from './observable';
+import { BasicObservable, EffectObservable, Observable } from './observable';
 import { CompositeReleasable, Releasable } from './releasable';
 import { TaskQueue } from './task-queue';
 
@@ -109,10 +109,10 @@ export namespace Store {
   export function newStoreObservable<T>(
     obs: Observable<T>
   ): Observable<Store<T>> {
-    return new BasicObservable<Store<T>>(create => {
+    return new EffectObservable<Store<T>>((addReleasable, _abortSignal) => {
       const store = new Store(obs);
-      const releaseValue = create(store);
-      return Releasable.sequential([releaseValue, store]);
+      addReleasable(store);
+      return store;
     });
   }
 
@@ -123,8 +123,8 @@ export namespace Store {
   export function newCellObservable<T>(
     initialValue: T
   ): Observable<[Store<T>, (newValue: T) => Promise<void>]> {
-    return new BasicObservable<[Store<T>, (newValue: T) => Promise<void>]>(
-      create => {
+    return new EffectObservable<[Store<T>, (newValue: T) => Promise<void>]>(
+      (addReleasable, _abortSignal) => {
         // Request task queue
         const tasks: TaskQueue<T> = new TaskQueue<T>();
 
@@ -155,14 +155,14 @@ export namespace Store {
           })
         );
 
-        const releaseValue = create([
+        addReleasable(innerStore);
+
+        return [
           innerStore,
           async (value: T) => {
             await tasks.enqueue(value);
           },
-        ]);
-
-        return Releasable.parallel([innerStore, releaseValue]);
+        ];
       }
     );
   }
@@ -175,8 +175,8 @@ export namespace Store {
   export function newPortalObservable<T>(): Observable<
     [Store<T>, (newValue: T) => Observable<void>]
   > {
-    return new BasicObservable<[Store<T>, (newValue: T) => Observable<void>]>(
-      create => {
+    return new EffectObservable<[Store<T>, (newValue: T) => Observable<void>]>(
+      (addReleasable, _abortSignal) => {
         let innerCreateTunnel: (value: T) => Releasable;
 
         const innerStore: Store<T> = new Store<T>(
@@ -187,7 +187,9 @@ export namespace Store {
           })
         );
 
-        const releaseValue = create([
+        addReleasable(innerStore);
+
+        return [
           innerStore,
           (value: T) => {
             // Return Observable<void> that adds the value
@@ -196,9 +198,7 @@ export namespace Store {
               return Releasable.sequential([create(undefined), releasable]);
             });
           },
-        ]);
-
-        return Releasable.sequential([releaseValue, innerStore]);
+        ];
       }
     );
   }

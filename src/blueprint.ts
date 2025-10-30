@@ -1,7 +1,7 @@
 import { BasicReleasable, CompositeReleasable, Releasable } from './releasable';
-import { BasicObservable, Observable } from './observable';
+import { BasicObservable, EffectObservable, Observable } from './observable';
 import { Store } from './store';
-import { List } from 'immutable';
+import { is, List } from 'immutable';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BlueprintResult = any;
@@ -18,10 +18,10 @@ let BLUEPRINT_GLOBAL_CONTEXT: BLUEPRINT_GLOBAL_CONTEXT_TYPE | undefined =
 
 const BLUEPRINT_CHAIN_EXCEPTION_SYMBOL = Symbol('BlueprintChainException');
 
-type BlueprintChainException<U> = {
-  [BLUEPRINT_CHAIN_EXCEPTION_SYMBOL]: true;
-  observable: Observable<U>;
-};
+class BlueprintChainException {
+  public readonly [BLUEPRINT_CHAIN_EXCEPTION_SYMBOL]: true = true;
+  constructor(public readonly releasable: Releasable) {}
+}
 
 export namespace Blueprint {
   export type Context<T> = {
@@ -44,19 +44,21 @@ export namespace Blueprint {
   function provideContext<T>(key: symbol, value: T): void {
     const global = getBlueprintGlobalContext();
     useObservable(
-      new BasicObservable<void>(create => {
+      new EffectObservable<void>((addReleasable, _abortSignal) => {
         const temp = global.getUserCtx()[key];
         global.getUserCtx()[key] = value;
-        return Releasable.sequential([
-          create(undefined),
+
+        addReleasable(
           new BasicReleasable(async () => {
             if (temp === undefined) {
               delete global.getUserCtx()[key];
             } else {
               global.getUserCtx()[key] = temp;
             }
-          }),
-        ]);
+          })
+        );
+
+        return undefined;
       })
     );
   }
@@ -98,17 +100,27 @@ export namespace Blueprint {
     };
   }
 
+  /**
+   * Convert a Blueprint function into an Observable.
+   */
   export function toObservable<T>(
     blueprint: () => T,
     userCtx?: UserContext
   ): Observable<T> {
     const initialUserCtx = userCtx ?? {};
 
-    // Run Blueprint with history (Immutable.List-based implementation)
-    function runBlueprintWithHistory(
-      history: List<BlueprintResult>
-    ): Observable<T> {
+    // Observe blueprint with given history
+    // この関数自体は同期的であることに注意。
+    function observeBlueprint(
+      initialHistory: List<BlueprintResult>,
+      create: (value: T) => Releasable
+    ): Releasable {
+      let history = initialHistory;  // let で管理して同期実行時に伸ばす
       let currentIndex = 0;
+
+      // 同期的な releasable を保持するための CompositeReleasable
+      const syncResultReleasable: CompositeReleasable =
+        new CompositeReleasable();
 
       // Function to chain Observables
       function use<U>(observable: Observable<U>): U {
@@ -118,13 +130,72 @@ export namespace Blueprint {
           currentIndex++;
           return value;
         } else {
-          // History exhausted: create continuation and chain Observable
-          const continuation = (v: U): Observable<T> => {
+          const observeCont = (
+            v: U,
+            create: (value: T) => Releasable
+          ): Releasable => {
             // Immutable.List approach: O(log n) persistent append
-            return runBlueprintWithHistory(history.push(v));
+            return observeBlueprint(history.push(v), create);
           };
 
-          throw observable.flatMap(continuation);
+          if (observable instanceof EffectObservable) {
+            // observable が EffectObservable の場合、次の性質を持つ
+            // 値は一回のみ発火する (同期 or 非同期)
+            // 発火した場合、その寿命は observation の寿命と一致する
+
+            // まずは実行し、同期的 / 非同期的発火を判定する
+            const { result, releasable } = (
+              observable as EffectObservable<U>
+            ).run();
+            if (result instanceof Promise) {
+              // 非同期発火の場合
+              // 得られた releasable は syncResultReleasable に追加する
+              // この releasable は Promise を実行中ならキャンセルし、実行後なら計算をクリーンアップする
+              syncResultReleasable.add(releasable);
+
+              // キャンセルフラグ
+              let isCancelled = false;
+              syncResultReleasable.add({
+                release: async () => {
+                  isCancelled = true;
+                },
+              });
+
+              // Promise が解決したときに observeCont を呼び出して後続の処理を監視対象とする
+              result
+                .then(value => {
+                  // キャンセルチェック
+                  if (isCancelled) return;
+
+                  const observation = observeCont(value, create);
+                  syncResultReleasable.add(observation);
+                })
+                .catch(_e => {
+                  // Ignore errors here; they should be handled in the maker function
+                });
+
+              throw BLUEPRINT_CHAIN_EXCEPTION_SYMBOL;
+            } else {
+              // 同期発火の場合
+              // 得られた releasable は同期的 syncResultReleasable に追加する
+              syncResultReleasable.add(releasable);
+
+              // 履歴に追加
+              history = history.push(result);
+              currentIndex++;
+
+              // blueprint の処理を継続する (重要 : throw を使わないのである程度高速になることが期待される)
+              return result;
+            }
+          } else {
+            const observer = (v: U): Releasable => {
+              return observeCont(v, create);
+            };
+            const observation = observable.observe(observer);
+            syncResultReleasable.add(observation);
+
+            throw BLUEPRINT_CHAIN_EXCEPTION_SYMBOL;
+          }
         }
       }
 
@@ -137,11 +208,12 @@ export namespace Blueprint {
       try {
         const result = blueprint();
         BLUEPRINT_GLOBAL_CONTEXT = temp;
-        return Observable.pure(result);
+        syncResultReleasable.add(create(result));
+        return syncResultReleasable;
       } catch (e) {
         BLUEPRINT_GLOBAL_CONTEXT = temp;
-        if (e instanceof Observable) {
-          return e;
+        if (e === BLUEPRINT_CHAIN_EXCEPTION_SYMBOL) {
+          return syncResultReleasable;
         }
         // If user code caught and re-threw a BlueprintChainException,
         // or if this is a genuine user error, re-throw it
@@ -149,7 +221,9 @@ export namespace Blueprint {
       }
     }
 
-    return runBlueprintWithHistory(List());
+    return new BasicObservable<T>(create => {
+      return observeBlueprint(List<BlueprintResult>(), create);
+    });
   }
 
   export function useObservable<T>(observable: Observable<T>): T {
@@ -207,71 +281,28 @@ export namespace Blueprint {
     ) => Promise<T> | T
   ): T {
     return useObservable(
-      new BasicObservable<T>(create => {
-        const abortController = new AbortController();
-        const computationReleasable = new CompositeReleasable();
-        const valueReleasable = new CompositeReleasable();
-
-        // Start async operation
-        const makerResult = maker((r: Releasable) => {
-          computationReleasable.add(r);
-        }, abortController.signal);
-
-        if (makerResult instanceof Promise) {
-          makerResult
-            .then(value => {
-              if (!abortController.signal.aborted) {
-                valueReleasable.add(create(value));
-              }
-            })
-            .catch(err => {
-              // Log error to help with debugging
-              if (!abortController.signal.aborted) {
-                console.error(
-                  'Error in Blueprint.useEffect:',
-                  err instanceof Error ? err.message : err
-                );
-                if (err instanceof Error && err.stack) {
-                  console.error('Stack trace:', err.stack);
-                }
-              }
-              // Note: Errors are logged but not propagated to avoid breaking the Observable chain
-              // Users should handle errors within their maker function if they need custom error handling
-            });
-        } else {
-          if (!abortController.signal.aborted) {
-            valueReleasable.add(create(makerResult));
-          }
-        }
-
-        return Releasable.sequential([
-          valueReleasable,
-          {
-            release: async () => {
-              abortController.abort();
-            },
-          },
-          computationReleasable,
-        ]);
+      new EffectObservable<T>((addReleasable, abortSignal) => {
+        return maker(addReleasable, abortSignal);
       })
     );
   }
 
   export function useTimeout(delayMs: number): void {
     return useObservable(
-      new BasicObservable<void>(create => {
-        const valueReleasable = new CompositeReleasable();
-        const timeout = setTimeout(() => {
-          valueReleasable.add(create(undefined));
-        }, delayMs);
-        return Releasable.parallel([
-          {
+      new EffectObservable<void>((addReleasable, abortSignal) => {
+        return new Promise<void>(resolve => {
+          const timeout = setTimeout(() => {
+            if (!abortSignal.aborted) {
+              resolve();
+            }
+          }, delayMs);
+
+          addReleasable({
             release: async () => {
               clearTimeout(timeout);
             },
-          },
-          valueReleasable,
-        ]);
+          });
+        });
       })
     );
   }

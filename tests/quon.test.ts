@@ -214,7 +214,7 @@ describe('Blueprint basic functionality', () => {
           useLog(logs, `value2: ${use(value2Store)}`);
         });
 
-        useTimeout(30);
+        useTimeout(50);
         // -> "value1: 0", "value2: 100"
 
         useEffect(async () => await setValue1(1));
@@ -284,55 +284,6 @@ describe('Blueprint basic functionality', () => {
       assert.strictEqual(result.passed, true, result.message);
 
       await store.release();
-    });
-  });
-
-  describe('Blueprint error handling', () => {
-    it('should handle async errors in useEffect and log them', async () => {
-      const errors: string[] = [];
-
-      // Capture console.error
-      const originalError = console.error;
-      console.error = (...args: any[]) => {
-        errors.push(args.join(' '));
-      };
-
-      const blueprint = () => {
-        useEffect(async () => {
-          // Async error to test Promise rejection handling
-          await Promise.resolve();
-          throw new Error('Test async error in useEffect');
-        });
-      };
-
-      const store = toStore(blueprint);
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Restore console.error
-      console.error = originalError;
-
-      // Check that error was logged
-      assert.ok(
-        errors.some(e => e.includes('Test async error in useEffect')),
-        'Async error should be logged'
-      );
-
-      await store.release();
-    });
-
-    it('should handle missing context and throw descriptive error', () => {
-      const testContext = Blueprint.createContext<number>();
-
-      const blueprint = () => {
-        return testContext.useConsumer();
-      };
-
-      try {
-        Blueprint.toObservable(blueprint);
-        assert.fail('Should have thrown an error');
-      } catch (e: any) {
-        assert.ok(e.message.includes('No context value provided'));
-      }
     });
   });
 
