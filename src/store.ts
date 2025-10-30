@@ -1,5 +1,5 @@
 import { BiLinkMap } from './bilink-map';
-import { BasicObservable, Blueprint, Observable } from './observable';
+import { BasicObservable, Observable } from './observable';
 import { CompositeReleasable, Releasable } from './releasable';
 import { TaskQueue } from './task-queue';
 
@@ -103,28 +103,26 @@ export class Store<T> extends Observable<T> implements Releasable {
 
 export namespace Store {
   /**
-   * Instantiate a Blueprint.
-   * If called within a Blueprint, that Blueprint becomes the parent
-   * If called outside a Blueprint, creates an independent Store (not recommended: use fromBlueprint directly)
+   * Wrap an Observable in a Store as an effect Observable.
+   * The Store is created synchronously and returned.
    */
-  export function useBlueprint<T>(blueprint: () => T): Store<T> {
-    const userContext = Blueprint.useUserContext();
-    return Blueprint.useObservable(
-      new BasicObservable<Store<T>>(create => {
-        const store = new Store(Blueprint.toObservable(blueprint, userContext));
-        const releaseValue = create(new Store<T>(store));
-        return Releasable.sequential([releaseValue, store]);
-      })
-    );
+  export function newStoreObservable<T>(
+    obs: Observable<T>
+  ): Observable<Store<T>> {
+    return new BasicObservable<Store<T>>(create => {
+      const store = new Store(obs);
+      const releaseValue = create(store);
+      return Releasable.sequential([releaseValue, store]);
+    });
   }
 
-  export function fromBlueprint<T>(blueprint: () => T): Store<T> {
-    return new Store(Blueprint.toObservable(blueprint));
-  }
-
-  export function useState<T>(
+  /**
+   * Create an Observable that provides a single-value cell.
+   * The setter replaces the current value (releases old, creates new).
+   */
+  export function newCellObservable<T>(
     initialValue: T
-  ): [Store<T>, (newValue: T) => Promise<void>] {
+  ): Observable<[Store<T>, (newValue: T) => Promise<void>]> {
     return new BasicObservable<[Store<T>, (newValue: T) => Promise<void>]>(
       create => {
         // Request task queue
@@ -166,39 +164,43 @@ export namespace Store {
 
         return Releasable.parallel([innerStore, releaseValue]);
       }
-    ).use();
+    );
   }
 
   /**
-   * Update values from any location.
-   * The returned function is a Quon Blueprint. Therefore, it can only be called within a Blueprint.
-   * When called in a Blueprint, value set/clear is registered.
-   * When used in multiple places, multiple values belong simultaneously.
+   * Create an Observable that provides a multi-value portal.
+   * The setter returns an Observable<void> that represents adding/removing a value.
+   * Multiple values can coexist in the Store.
    */
-  export function usePortal<T>(): [Store<T>, (newValue: T) => void] {
-    return new BasicObservable<[Store<T>, (newValue: T) => void]>(create => {
-      let innerCreateTunnel: (value: T) => Releasable;
+  export function newPortalObservable<T>(): Observable<
+    [Store<T>, (newValue: T) => Observable<void>]
+  > {
+    return new BasicObservable<[Store<T>, (newValue: T) => Observable<void>]>(
+      create => {
+        let innerCreateTunnel: (value: T) => Releasable;
 
-      const innerStore: Store<T> = new Store<T>(
-        new BasicObservable<T>(observer => {
-          // Executed synchronously by Store constructor
-          innerCreateTunnel = observer;
-          return Releasable.noop;
-        })
-      );
+        const innerStore: Store<T> = new Store<T>(
+          new BasicObservable<T>(observer => {
+            // Executed synchronously by Store constructor
+            innerCreateTunnel = observer;
+            return Releasable.noop;
+          })
+        );
 
-      const releaseValue = create([
-        innerStore,
-        (value: T) => {
-          // Add value
-          new BasicObservable(create => {
-            const releasable = innerCreateTunnel(value);
-            return Releasable.sequential([create(undefined), releasable]);
-          }).use();
-        },
-      ]);
+        const releaseValue = create([
+          innerStore,
+          (value: T) => {
+            // Return Observable<void> that adds the value
+            return new BasicObservable<void>(create => {
+              const releasable = innerCreateTunnel(value);
+              return Releasable.sequential([create(undefined), releasable]);
+            });
+          },
+        ]);
 
-      return Releasable.sequential([releaseValue, innerStore]);
-    }).use();
+        return Releasable.sequential([releaseValue, innerStore]);
+      }
+    );
   }
+
 }

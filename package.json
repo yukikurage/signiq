@@ -13,7 +13,8 @@
     "format:check": "prettier --check src/**/*.{ts,tsx,js,json}",
     "test": "node --test --import tsx tests/**/*.test.ts",
     "test:watch": "node --test --watch --import tsx tests/**/*.test.ts",
-    "examples": "tsx examples/basic.ts"
+    "examples": "tsx examples/basic.ts",
+    "benchmark": "for file in benchmarks/*.bench.ts; do tsx \"$file\"; done"
   },
   "keywords": [
     "reactive",
@@ -45,7 +46,11 @@
     "eslint": "^9.35.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
-    "typescript": "^5.9.2",
-    "tsx": "^4.20.5"
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@types/benchmark": "^2.1.5",
+    "benchmark": "^2.1.4"
   }
 }

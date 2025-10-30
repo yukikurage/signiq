@@ -1,11 +1,21 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { LogCapture } from './test-utils';
-import { Store } from '../src';
-import { Blueprint } from '../src/observable';
+import {
+  Blueprint,
+  Store,
+  use,
+  useEffect,
+  useTimeout,
+  useGuard,
+  toStore,
+  useStore,
+  useCell,
+  usePortal,
+} from '../src';
 
 const useLog = (logs: LogCapture, label: string, releaseLabel?: string) =>
-  Blueprint.useEffect(addRelease => {
+  useEffect(addRelease => {
     logs.log(`${label}`);
     if (releaseLabel) {
       addRelease({
@@ -25,7 +35,7 @@ describe('Blueprint basic functionality', () => {
       useLog(logs, `value: ${value}`);
     };
 
-    const store = Store.fromBlueprint(blueprint);
+    const store = toStore(blueprint);
     await new Promise(resolve => setTimeout(resolve, 10));
 
     const result = logs.expect(['value: 42']);
@@ -39,11 +49,11 @@ describe('Blueprint basic functionality', () => {
 
     const blueprint = () => {
       const value = Blueprint.useIterable([1, 2, 3, 4, 5]);
-      Blueprint.useGuard(() => value % 2 === 0);
+      useGuard(() => value % 2 === 0);
       useLog(logs, `filtered: ${value}`);
     };
 
-    const store = Store.fromBlueprint(blueprint);
+    const store = toStore(blueprint);
     await new Promise(resolve => setTimeout(resolve, 10));
 
     const result = logs.expect(['filtered: 2', 'filtered: 4']);
@@ -60,7 +70,7 @@ describe('Blueprint basic functionality', () => {
       useLog(logs, `never: ${value}`);
     };
 
-    const store = Store.fromBlueprint(blueprint);
+    const store = toStore(blueprint);
     await new Promise(resolve => setTimeout(resolve, 10));
 
     const result = logs.expect([]);
@@ -74,19 +84,19 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [valueStore, setValue] = Store.useState(0);
-        Store.useBlueprint(() => {
-          useLog(logs, `value: ${valueStore.use()}`);
+        const [valueStore, setValue] = useCell(0);
+        useStore(() => {
+          useLog(logs, `value: ${use(valueStore)}`);
         });
 
-        Blueprint.useTimeout(20);
-        Blueprint.useEffect(async () => await setValue(5));
+        useTimeout(20);
+        useEffect(async () => await setValue(5));
 
-        Blueprint.useTimeout(20);
-        Blueprint.useEffect(async () => await setValue(10));
+        useTimeout(20);
+        useEffect(async () => await setValue(10));
       };
 
-      const store = Store.fromBlueprint(blueprint);
+      const store = toStore(blueprint);
 
       // 初期値
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -110,34 +120,34 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [valueStore, useValuePortal] = Store.usePortal();
+        const [valueStore, useValuePortal] = usePortal();
 
-        const [refetchStore, setRefetch] = Store.useState<number>(0);
+        const [refetchStore, setRefetch] = Blueprint.useCell<number>(0);
 
-        Store.useBlueprint(() => {
-          const value = valueStore.use();
+        useStore(() => {
+          const value = use(valueStore);
           useLog(logs, `created: ${value}`, `released: ${value}`);
         });
 
-        Store.useBlueprint(() => {
-          const refetch = refetchStore.use();
+        useStore(() => {
+          const refetch = use(refetchStore);
           useValuePortal(refetch);
         });
 
-        Store.useBlueprint(() => {
-          const refetch = refetchStore.use();
-          Blueprint.useTimeout(10);
+        useStore(() => {
+          const refetch = use(refetchStore);
+          useTimeout(10);
           useValuePortal(refetch + 100);
         });
 
-        Blueprint.useTimeout(20);
-        Blueprint.useEffect(async () => await setRefetch(5));
+        useTimeout(20);
+        useEffect(async () => await setRefetch(5));
 
-        Blueprint.useTimeout(20);
-        Blueprint.useEffect(async () => await setRefetch(10));
+        useTimeout(20);
+        useEffect(async () => await setRefetch(10));
       };
 
-      const store = Store.fromBlueprint(blueprint);
+      const store = toStore(blueprint);
 
       // 初期値
       await new Promise(resolve => setTimeout(resolve, 60));
@@ -162,23 +172,23 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [valueStore, setValue] = Store.useState(1);
+        const [valueStore, setValue] = useCell(1);
 
-        Store.useBlueprint(() => {
-          useLog(logs, `value: ${valueStore.use()}`);
+        useStore(() => {
+          useLog(logs, `value: ${use(valueStore)}`);
         });
 
-        Blueprint.useTimeout(20);
-        Blueprint.useEffect(async () => await setValue(2));
+        useTimeout(20);
+        useEffect(async () => await setValue(2));
 
-        Blueprint.useTimeout(10);
-        Blueprint.useEffect(async () => await setValue(2));
+        useTimeout(10);
+        useEffect(async () => await setValue(2));
 
-        Blueprint.useTimeout(10);
-        Blueprint.useEffect(async () => await setValue(3));
+        useTimeout(10);
+        useEffect(async () => await setValue(3));
       };
 
-      const store = Store.fromBlueprint(blueprint);
+      const store = toStore(blueprint);
       await new Promise(resolve => setTimeout(resolve, 60));
 
       const result = logs.expect(['value: 1', 'value: 2', 'value: 3']);
@@ -193,34 +203,34 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [value1Store, setValue1] = Store.useState(0);
-        const [value2Store, setValue2] = Store.useState(100);
+        const [value1Store, setValue1] = useCell(0);
+        const [value2Store, setValue2] = useCell(100);
 
-        Store.useBlueprint(() => {
+        useStore(() => {
           // Depends 1st state
-          useLog(logs, `value1: ${value1Store.use()}`);
-          Blueprint.useTimeout(20);
+          useLog(logs, `value1: ${use(value1Store)}`);
+          useTimeout(20);
           // Depends 2nd state
-          useLog(logs, `value2: ${value2Store.use()}`);
+          useLog(logs, `value2: ${use(value2Store)}`);
         });
 
-        Blueprint.useTimeout(30);
+        useTimeout(30);
         // -> "value1: 0", "value2: 100"
 
-        Blueprint.useEffect(async () => await setValue1(1));
-        Blueprint.useTimeout(10);
-        Blueprint.useEffect(async () => await setValue1(2));
-        Blueprint.useTimeout(30);
+        useEffect(async () => await setValue1(1));
+        useTimeout(10);
+        useEffect(async () => await setValue1(2));
+        useTimeout(30);
         // cancel before "value2: 100" is logged
         // -> "value1: 1", "value1: 2", "value2: 100"
 
-        Blueprint.useEffect(async () => await setValue2(200));
-        Blueprint.useTimeout(10);
-        // Resume from `value2Store.use()`  (no value1 logs)
+        useEffect(async () => await setValue2(200));
+        useTimeout(10);
+        // Resume from `Blueprint.use(value2Store)`  (no value1 logs)
         // -> "value2: 200"
       };
 
-      const store = Store.fromBlueprint(blueprint);
+      const store = toStore(blueprint);
 
       // 2回目の更新
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -248,26 +258,26 @@ describe('Blueprint basic functionality', () => {
       }>();
 
       const blueprint = () => {
-        const [count, setCount] = Store.useState(0);
+        const [count, setCount] = useCell(0);
         counterCtx.useProvider({ count, setCount });
 
-        Store.useBlueprint(() => {
+        useStore(() => {
           const counter = counterCtx.useConsumer();
-          useLog(logs, `count: ${counter.count.use()}`);
+          useLog(logs, `count: ${use(counter.count)}`);
         });
 
-        Store.useBlueprint(() => {
+        useStore(() => {
           const counter = counterCtx.useConsumer();
-          Blueprint.useTimeout(20);
-          Blueprint.useEffect(async () => await counter.setCount(1));
-          Blueprint.useTimeout(20);
-          Blueprint.useEffect(async () => await counter.setCount(2));
+          useTimeout(20);
+          useEffect(async () => await counter.setCount(1));
+          useTimeout(20);
+          useEffect(async () => await counter.setCount(2));
         });
 
-        Blueprint.useTimeout(60);
+        useTimeout(60);
       };
 
-      const store = Store.fromBlueprint(blueprint);
+      const store = toStore(blueprint);
 
       await new Promise(resolve => setTimeout(resolve, 100));
       const result = logs.expect(['count: 0', 'count: 1', 'count: 2']);
@@ -288,14 +298,14 @@ describe('Blueprint basic functionality', () => {
       };
 
       const blueprint = () => {
-        Blueprint.useEffect(async () => {
+        useEffect(async () => {
           // Async error to test Promise rejection handling
           await Promise.resolve();
           throw new Error('Test async error in useEffect');
         });
       };
 
-      const store = Store.fromBlueprint(blueprint);
+      const store = toStore(blueprint);
       await new Promise(resolve => setTimeout(resolve, 10));
 
       // Restore console.error
@@ -334,7 +344,7 @@ describe('Blueprint basic functionality', () => {
         useLog(logs, 'created');
       };
 
-      const store = Store.fromBlueprint(blueprint);
+      const store = toStore(blueprint);
       await new Promise(resolve => setTimeout(resolve, 10));
 
       // Call release multiple times - should be idempotent
