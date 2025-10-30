@@ -78,3 +78,15 @@ export class BasicObservable<T> extends Observable<T> {
     return this.subscribeFunc(observer);
   }
 }
+
+export class SyncObservable<T> extends Observable<T> {
+  constructor(private readonly init: () => { value: T; release: Releasable }) {
+    super();
+  }
+
+  public observe(observer: (value: T) => Releasable): Releasable {
+    const { value, release } = this.init();
+    const observerRelease = observer(value);
+    return Releasable.sequential([observerRelease, release]);
+  }
+}

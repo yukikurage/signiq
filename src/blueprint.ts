@@ -1,6 +1,7 @@
 import { BasicReleasable, CompositeReleasable, Releasable } from './releasable';
 import { BasicObservable, Observable } from './observable';
 import { Store } from './store';
+import { List } from 'immutable';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BlueprintResult = any;
@@ -15,33 +16,12 @@ type BLUEPRINT_GLOBAL_CONTEXT_TYPE = {
 let BLUEPRINT_GLOBAL_CONTEXT: BLUEPRINT_GLOBAL_CONTEXT_TYPE | undefined =
   undefined;
 
-class BlueprintChainException<U, T> extends Error {
-  private static readonly BLUEPRINT_CHAIN_EXCEPTION_SYMBOL = Symbol(
-    'BlueprintChainException'
-  );
+const BLUEPRINT_CHAIN_EXCEPTION_SYMBOL = Symbol('BlueprintChainException');
 
-  constructor(
-    public readonly observable: Observable<U>,
-    public readonly continuation: (value: U) => Observable<T>
-  ) {
-    super('BlueprintChainException (internal use only)');
-    Object.setPrototypeOf(this, BlueprintChainException.prototype);
-    (this as any)[BlueprintChainException.BLUEPRINT_CHAIN_EXCEPTION_SYMBOL] =
-      true;
-  }
-
-  static isBlueprintChainException(
-    e: unknown
-  ): e is BlueprintChainException<unknown, unknown> {
-    return (
-      typeof e === 'object' &&
-      e !== null &&
-      BlueprintChainException.BLUEPRINT_CHAIN_EXCEPTION_SYMBOL in e &&
-      (e as any)[BlueprintChainException.BLUEPRINT_CHAIN_EXCEPTION_SYMBOL] ===
-        true
-    );
-  }
-}
+type BlueprintChainException<U> = {
+  [BLUEPRINT_CHAIN_EXCEPTION_SYMBOL]: true;
+  observable: Observable<U>;
+};
 
 export namespace Blueprint {
   export type Context<T> = {
@@ -124,28 +104,27 @@ export namespace Blueprint {
   ): Observable<T> {
     const initialUserCtx = userCtx ?? {};
 
-    // Run Blueprint with history (Array-based implementation)
+    // Run Blueprint with history (Immutable.List-based implementation)
     function runBlueprintWithHistory(
-      history: BlueprintResult[]
+      history: List<BlueprintResult>
     ): Observable<T> {
       let currentIndex = 0;
 
       // Function to chain Observables
       function use<U>(observable: Observable<U>): U {
-        if (currentIndex < history.length) {
+        if (currentIndex < history.size) {
           // History available: return the historical value and advance index
-          const value = history[currentIndex];
+          const value = history.get(currentIndex);
           currentIndex++;
           return value;
         } else {
           // History exhausted: create continuation and chain Observable
           const continuation = (v: U): Observable<T> => {
-            // Array approach: copy array and append new value
-            return runBlueprintWithHistory([...history, v]);
+            // Immutable.List approach: O(log n) persistent append
+            return runBlueprintWithHistory(history.push(v));
           };
 
-          // Throw exception to return Observable from outer scope
-          throw new BlueprintChainException<U, T>(observable, continuation);
+          throw observable.flatMap(continuation);
         }
       }
 
@@ -161,9 +140,8 @@ export namespace Blueprint {
         return Observable.pure(result);
       } catch (e) {
         BLUEPRINT_GLOBAL_CONTEXT = temp;
-        if (BlueprintChainException.isBlueprintChainException(e)) {
-          // Catch Chain exception: chain Observable with continuation
-          return e.observable.flatMap(e.continuation) as Observable<T>;
+        if (e instanceof Observable) {
+          return e;
         }
         // If user code caught and re-threw a BlueprintChainException,
         // or if this is a genuine user error, re-throw it
@@ -171,7 +149,7 @@ export namespace Blueprint {
       }
     }
 
-    return runBlueprintWithHistory([]);
+    return runBlueprintWithHistory(List());
   }
 
   export function useObservable<T>(observable: Observable<T>): T {
