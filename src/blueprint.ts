@@ -115,12 +115,13 @@ export namespace Blueprint {
       initialHistory: List<BlueprintResult>,
       create: (value: T) => Releasable
     ): Releasable {
-      let history = initialHistory;  // let で管理して同期実行時に伸ばす
+      let history = initialHistory; // let で管理して同期実行時に伸ばす
       let currentIndex = 0;
 
       // 同期的な releasable を保持するための CompositeReleasable
       const syncResultReleasable: CompositeReleasable =
         new CompositeReleasable();
+      let currentResultReleasable: CompositeReleasable = syncResultReleasable;
 
       // Function to chain Observables
       function use<U>(observable: Observable<U>): U {
@@ -130,72 +131,57 @@ export namespace Blueprint {
           currentIndex++;
           return value;
         } else {
+          const currentHistory = history;
           const observeCont = (
             v: U,
             create: (value: T) => Releasable
           ): Releasable => {
             // Immutable.List approach: O(log n) persistent append
-            return observeBlueprint(history.push(v), create);
+            return observeBlueprint(currentHistory.push(v), create);
+          };
+          let syncResult:
+            | undefined
+            | {
+                tag: 'DONE';
+                result: U;
+                nextCurrentResultReleasable: CompositeReleasable;
+              }
+            | {
+                tag: 'ASYNC';
+              };
+          const observer = (v: U): Releasable => {
+            if (!syncResult) {
+              // nextCurrentResultReleasable を更新する
+              const releasable = new CompositeReleasable();
+              syncResult = {
+                tag: 'DONE',
+                result: v,
+                nextCurrentResultReleasable: releasable,
+              };
+              return releasable;
+            } else {
+              // 非同期 (または二回目以降の) 呼び出し
+              return observeCont(v, create);
+            }
           };
 
-          if (observable instanceof EffectObservable) {
-            // observable が EffectObservable の場合、次の性質を持つ
-            // 値は一回のみ発火する (同期 or 非同期)
-            // 発火した場合、その寿命は observation の寿命と一致する
+          const observation = observable.observe(observer);
 
-            // まずは実行し、同期的 / 非同期的発火を判定する
-            const { result, releasable } = (
-              observable as EffectObservable<U>
-            ).run();
-            if (result instanceof Promise) {
-              // 非同期発火の場合
-              // 得られた releasable は syncResultReleasable に追加する
-              // この releasable は Promise を実行中ならキャンセルし、実行後なら計算をクリーンアップする
-              syncResultReleasable.add(releasable);
-
-              // キャンセルフラグ
-              let isCancelled = false;
-              syncResultReleasable.add({
-                release: async () => {
-                  isCancelled = true;
-                },
-              });
-
-              // Promise が解決したときに observeCont を呼び出して後続の処理を監視対象とする
-              result
-                .then(value => {
-                  // キャンセルチェック
-                  if (isCancelled) return;
-
-                  const observation = observeCont(value, create);
-                  syncResultReleasable.add(observation);
-                })
-                .catch(_e => {
-                  // Ignore errors here; they should be handled in the maker function
-                });
-
-              throw BLUEPRINT_CHAIN_EXCEPTION_SYMBOL;
-            } else {
-              // 同期発火の場合
-              // 得られた releasable は同期的 syncResultReleasable に追加する
-              syncResultReleasable.add(releasable);
-
-              // 履歴に追加
-              history = history.push(result);
-              currentIndex++;
-
-              // blueprint の処理を継続する (重要 : throw を使わないのである程度高速になることが期待される)
-              return result;
-            }
+          if (syncResult?.tag === 'DONE') {
+            currentResultReleasable.add(observation);
+            currentResultReleasable = syncResult.nextCurrentResultReleasable;
+            const result = syncResult.result;
+            history = history.push(result);
+            currentIndex++;
+            syncResult = { tag: 'ASYNC' };
+            return result;
           } else {
-            const observer = (v: U): Releasable => {
-              return observeCont(v, create);
-            };
-            const observation = observable.observe(observer);
-            syncResultReleasable.add(observation);
-
+            // 非同期
+            syncResult = { tag: 'ASYNC' };
+            currentResultReleasable.add(observation);
             throw BLUEPRINT_CHAIN_EXCEPTION_SYMBOL;
           }
+          // }
         }
       }
 
@@ -208,7 +194,7 @@ export namespace Blueprint {
       try {
         const result = blueprint();
         BLUEPRINT_GLOBAL_CONTEXT = temp;
-        syncResultReleasable.add(create(result));
+        currentResultReleasable.add(create(result));
         return syncResultReleasable;
       } catch (e) {
         BLUEPRINT_GLOBAL_CONTEXT = temp;

@@ -52,9 +52,9 @@ export abstract class Observable<T> {
     });
   }
 
-  public static pure<T>(value: T): EffectObservable<T> {
-    return new EffectObservable<T>((_addReleasable, _abortSignal) => {
-      return value;
+  public static pure<T>(value: T): BasicObservable<T> {
+    return new BasicObservable<T>(observer => {
+      return observer(value);
     });
   }
 
@@ -71,6 +71,11 @@ export abstract class Observable<T> {
   }
 }
 
+/**
+ * 通常の Observable
+ * subscribeFunc により観測が行われる。
+ * Resource safety のために、発行した値は observation の寿命と一致するようにする。
+ */
 export class BasicObservable<T> extends Observable<T> {
   constructor(
     private readonly subscribeFunc: (
@@ -81,7 +86,54 @@ export class BasicObservable<T> extends Observable<T> {
   }
 
   public observe(observer: (value: T) => Releasable): Releasable {
-    return this.subscribeFunc(observer);
+    let resources: Set<{
+      resource: T;
+      releasable: Releasable;
+      releasing: boolean;
+    }> = new Set();
+    let addResource: (v: T, releasable: Releasable) => Releasable;
+    const waitForReleaseAll = new Promise<void>(
+      resolve =>
+        (addResource = (resource: T, releasable: Releasable) => {
+          const v = { resource, releasable: Releasable.noop, releasing: false };
+          v.releasable = {
+            release: async () => {
+              if (v.releasing) return;
+              v.releasing = true;
+              await releasable.release();
+              v.releasing = false;
+              resources.delete(v);
+              if (resources.size === 0) {
+                resolve();
+              }
+            },
+          };
+          resources.add(v);
+          return v.releasable;
+        })
+    );
+    const wrappedObserver = (value: T): Releasable => {
+      const releasable = observer(value);
+      const removeResource = addResource(value, releasable);
+      return removeResource;
+    };
+    const releaseSubscription = this.subscribeFunc(wrappedObserver);
+    return {
+      release: async () => {
+        // First, release the subscription to prevent new values
+        await releaseSubscription.release();
+        // Releasing でないものがあれば解放する
+        for (const r of [...resources]) {
+          if (!r.releasing) {
+            await r.releasable.release();
+          }
+        }
+        // Then, wait for all resources to be released
+        if (resources.size !== 0) {
+          await waitForReleaseAll;
+        }
+      },
+    };
   }
 }
 
