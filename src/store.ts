@@ -125,49 +125,63 @@ export namespace Store {
    */
   export function newCellRealm<T extends Structural>(
     initialValue: T
-  ): Realm<[Store<T>, (newValue: T) => Promise<void>]> {
-    return new EffectRealm<[Store<T>, (newValue: T) => Promise<void>]>(
-      (addReleasable, _abortSignal) => {
-        // Request task queue
-        const tasks: TaskQueue<T> = new TaskQueue<T>();
+  ): Realm<[Store<T>, (update: T | ((prevValue: T) => T)) => Promise<void>]> {
+    return new EffectRealm<
+      [Store<T>, (update: T | ((prevValue: T) => T)) => Promise<void>]
+    >((addReleasable, _abortSignal) => {
+      // Request task queue
+      const tasks: TaskQueue<(prevValue: T) => T> = new TaskQueue<
+        (prevValue: T) => T
+      >();
 
-        const innerStore = new Store<T>(
-          new BasicRealm<T>(observer => {
-            let currentValue: T = initialValue;
-            const valueReleasable = new CompositeReleasable();
-            valueReleasable.add(observer(initialValue));
+      const innerStore = new Store<T>(
+        new BasicRealm<T>(observer => {
+          let currentValue: T = initialValue;
+          const valueReleasable = new CompositeReleasable();
+          valueReleasable.add(observer(initialValue));
 
-            // Launch Tasks
-            const releaseTaskProcess = tasks.launch(async task => {
-              // Get queued tasks to check if there are more recent updates
-              const remainedTasks = tasks.getRemainingTasks();
-              // Skip this task if:
-              // 1. There are newer tasks queued (optimize by jumping to the latest)
-              // 2. The value hasn't changed (deduplicate)
-              if (remainedTasks.length > 0 || task === currentValue) {
-                return;
-              }
+          // Launch Tasks
+          const releaseTaskProcess = tasks.launch(async task => {
+            // Get queued tasks to check if there are more recent updates
+            const remainedTasks = tasks.getRemainingTasks();
+            // Skip this task if:
+            // 1. There are newer tasks queued (optimize by jumping to the latest)
+            // 2. The value hasn't changed (deduplicate)
+            if (remainedTasks.length > 0) {
+              return;
+            }
+            const newValue = task(currentValue);
+            if (newValue === currentValue) {
+              return;
+            }
 
-              // Release previous value
-              await valueReleasable.release();
-              // Create new value
-              currentValue = task;
-              valueReleasable.add(observer(currentValue));
-            });
-            return Releasable.parallel([releaseTaskProcess, valueReleasable]);
-          })
-        );
+            // Release previous value
+            await valueReleasable.release();
+            // Create new value
+            currentValue = newValue;
+            valueReleasable.add(observer(currentValue));
+          });
+          return Releasable.parallel([releaseTaskProcess, valueReleasable]);
+        })
+      );
 
-        addReleasable(innerStore);
+      addReleasable(innerStore);
 
-        return [
-          innerStore,
-          async (value: T) => {
-            await tasks.enqueue(value);
-          },
-        ];
-      }
-    );
+      return [
+        innerStore,
+        async (update: T | ((prevValue: T) => T)) => {
+          await tasks.enqueue(prevValue => {
+            if (typeof update === 'function') {
+              // Function update
+              return (update as (prevValue: T) => T)(prevValue);
+            } else {
+              // Direct value update
+              return update;
+            }
+          });
+        },
+      ];
+    });
   }
 
   /**

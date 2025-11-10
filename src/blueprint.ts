@@ -321,7 +321,7 @@ export namespace Blueprint {
    */
   export function useCell<T extends Structural>(
     initialValue: T
-  ): [Store<T>, (newValue: T) => Promise<void>] {
+  ): [Store<T>, (update: T | ((prevValue: T) => T)) => Promise<void>] {
     return Blueprint.use(Store.newCellRealm(initialValue));
   }
 
