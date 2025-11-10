@@ -1,7 +1,8 @@
 import { BasicReleasable, CompositeReleasable, Releasable } from './releasable';
-import { BasicObservable, EffectObservable, Observable } from './observable';
+import { BasicRealm, EffectRealm, Realm } from './realm';
 import { Store } from './store';
 import { is, List } from 'immutable';
+import { Structural } from './structual';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BlueprintResult = any;
@@ -9,7 +10,7 @@ type BlueprintResult = any;
 type UserContext = Record<symbol, BlueprintResult>;
 
 type BLUEPRINT_GLOBAL_CONTEXT_TYPE = {
-  use<T>(observable: Observable<T>): T;
+  use<T>(realm: Realm<T>): T;
   getUserCtx(): UserContext;
 };
 
@@ -35,7 +36,7 @@ export namespace Blueprint {
     if (global === undefined) {
       throw new Error(
         'Blueprint context access outside of Blueprint execution. ' +
-          'Make sure to call this function only within a Blueprint (inside Blueprint.toObservable or Store.fromBlueprint).'
+          'Make sure to call this function only within a Blueprint (inside Blueprint.toRealm or Store.fromBlueprint).'
       );
     }
     return global;
@@ -43,8 +44,8 @@ export namespace Blueprint {
 
   function provideContext<T>(key: symbol, value: T): void {
     const global = getBlueprintGlobalContext();
-    useObservable(
-      new EffectObservable<void>((addReleasable, _abortSignal) => {
+    useRealm(
+      new EffectRealm<void>((addReleasable, _abortSignal) => {
         const temp = global.getUserCtx()[key];
         global.getUserCtx()[key] = value;
 
@@ -101,12 +102,12 @@ export namespace Blueprint {
   }
 
   /**
-   * Convert a Blueprint function into an Observable.
+   * Convert a Blueprint function into an Realm.
    */
-  export function toObservable<T>(
+  export function toRealm<T>(
     blueprint: () => T,
     userCtx?: UserContext
-  ): Observable<T> {
+  ): Realm<T> {
     const initialUserCtx = userCtx ?? {};
 
     // Observe blueprint with given history
@@ -123,8 +124,8 @@ export namespace Blueprint {
         new CompositeReleasable();
       let currentResultReleasable: CompositeReleasable = syncResultReleasable;
 
-      // Function to chain Observables
-      function use<U>(observable: Observable<U>): U {
+      // Function to chain Realms
+      function use<U>(realm: Realm<U>): U {
         if (currentIndex < history.size) {
           // History available: return the historical value and advance index
           const value = history.get(currentIndex);
@@ -165,7 +166,7 @@ export namespace Blueprint {
             }
           };
 
-          const observation = observable.observe(observer);
+          const observation = realm.instantiate(observer);
 
           if (syncResult?.tag === 'DONE') {
             currentResultReleasable.add(observation);
@@ -207,27 +208,27 @@ export namespace Blueprint {
       }
     }
 
-    return new BasicObservable<T>(create => {
+    return new BasicRealm<T>(create => {
       return observeBlueprint(List<BlueprintResult>(), create);
     });
   }
 
-  export function useObservable<T>(observable: Observable<T>): T {
+  export function useRealm<T>(realm: Realm<T>): T {
     const global = getBlueprintGlobalContext();
-    return global.use(observable);
+    return global.use(realm);
   }
 
-  export function use<T>(observable: Observable<T>): T {
-    return useObservable(observable);
+  export function use<T>(realm: Realm<T>): T {
+    return useRealm(realm);
   }
 
   export function useNever(): never {
-    return useObservable(BasicObservable.never<never>());
+    return useRealm(BasicRealm.never<never>());
   }
 
   export function useGuard(predicate: () => boolean): void {
-    return useObservable(
-      new BasicObservable<void>(create => {
+    return useRealm(
+      new BasicRealm<void>(create => {
         if (!predicate()) {
           return Releasable.noop;
         }
@@ -237,8 +238,8 @@ export namespace Blueprint {
   }
 
   export function useIterable<T>(iterable: Iterable<T>): T {
-    return useObservable(
-      new BasicObservable<T>(create => {
+    return useRealm(
+      new BasicRealm<T>(create => {
         const releasables: Releasable[] = [];
         for (const value of iterable) {
           const r = create(value);
@@ -253,10 +254,8 @@ export namespace Blueprint {
     leftBlueprint: () => T,
     rightBlueprint: () => U
   ): T | U {
-    return useObservable(
-      Blueprint.toObservable(leftBlueprint).merge(
-        Blueprint.toObservable(rightBlueprint)
-      )
+    return useRealm(
+      Blueprint.toRealm(leftBlueprint).merge(Blueprint.toRealm(rightBlueprint))
     );
   }
 
@@ -266,16 +265,16 @@ export namespace Blueprint {
       abortSignal: AbortSignal
     ) => Promise<T> | T
   ): T {
-    return useObservable(
-      new EffectObservable<T>((addReleasable, abortSignal) => {
+    return useRealm(
+      new EffectRealm<T>((addReleasable, abortSignal) => {
         return maker(addReleasable, abortSignal);
       })
     );
   }
 
   export function useTimeout(delayMs: number): void {
-    return useObservable(
-      new EffectObservable<void>((addReleasable, abortSignal) => {
+    return useRealm(
+      new EffectRealm<void>((addReleasable, abortSignal) => {
         return new Promise<void>(resolve => {
           const timeout = setTimeout(() => {
             if (!abortSignal.aborted) {
@@ -302,7 +301,7 @@ export namespace Blueprint {
    * This is the main entry point for creating root Stores.
    */
   export function toStore<T>(blueprint: () => T): Store<T> {
-    return new Store(Blueprint.toObservable(blueprint));
+    return new Store(Blueprint.toRealm(blueprint));
   }
 
   /**
@@ -311,30 +310,30 @@ export namespace Blueprint {
    */
   export function useStore<T>(blueprint: () => T): Store<T> {
     const userContext = Blueprint.useUserContext();
-    const obs = Blueprint.toObservable(blueprint, userContext);
-    return Blueprint.use(Store.newStoreObservable(obs));
+    const rlm = Blueprint.toRealm(blueprint, userContext);
+    return Blueprint.use(Store.newStoreRealm(rlm));
   }
 
   /**
    * Create a single-value cell within a Blueprint.
    * The setter replaces the current value (releases old, creates new).
-   * This is a convenience wrapper around Store.newCellObservable().
+   * This is a convenience wrapper around Store.newCellRealm().
    */
-  export function useCell<T>(
+  export function useCell<T extends Structural>(
     initialValue: T
   ): [Store<T>, (newValue: T) => Promise<void>] {
-    return Blueprint.use(Store.newCellObservable(initialValue));
+    return Blueprint.use(Store.newCellRealm(initialValue));
   }
 
   /**
    * Create a multi-value portal within a Blueprint.
    * The setter is a Blueprint function that adds/removes values.
    * Multiple values can coexist in the Store.
-   * This is a convenience wrapper around Store.newPortalObservable().
+   * This is a convenience wrapper around Store.newPortalRealm().
    */
   export function usePortal<T>(): [Store<T>, (newValue: T) => void] {
     return Blueprint.use(
-      Store.newPortalObservable<T>().map(([s, set]) => [
+      Store.newPortalRealm<T>().map(([s, set]) => [
         s,
         (value: T) => {
           return Blueprint.use(set(value));

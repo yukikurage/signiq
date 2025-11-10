@@ -1,10 +1,10 @@
 # @quon/core
 
-A lightweight reactive programming library built around **Observable**, **Blueprint**, and **Store** - providing a declarative API for managing reactive state and side effects with automatic cleanup.
+A lightweight reactive programming library built around **Realm**, **Blueprint**, and **Store** - providing a declarative API for managing reactive resource and side effects with automatic cleanup.
 
 ## Features
 
-- **Observable Streams**: Represent values that change over time
+- **Realm Streams**: Represent values that change over time
 - **Blueprint DSL**: Synchronous-style syntax for composing reactive operations
 - **Store Management**: Handle multiple concurrent values with automatic lifecycle
 - **Context API**: Type-safe dependency injection for Blueprints
@@ -19,7 +19,14 @@ npm install @quon/core
 ## Quick Start
 
 ```typescript
-import { use, useEffect, useTimeout, useCell, useStore, toStore } from '@quon/core';
+import {
+  use,
+  useEffect,
+  useTimeout,
+  useCell,
+  useStore,
+  toStore,
+} from '@quon/core';
 
 const counterApp = () => {
   // Create a state with getter and setter
@@ -53,29 +60,29 @@ const store = toStore(counterApp);
 
 ## Core Concepts
 
-### Observable
+### Realm
 
-`Observable<T>` represents a stream of values over time. It can be transformed, filtered, and combined.
+`Realm<T>` represents a space where resources are created and released. It can be transformed, filtered, and combined.
 
 ```typescript
-import { Observable } from '@quon/core';
+import { Realm } from '@quon/core';
 
 // Create from a value
-const obs = Observable.pure(42);
+const = Realm.pure(42);
 
 // Transform values
-const doubled = obs.flatMap(x => Observable.pure(x * 2));
+const doubled = rlm.flatMap(x => Realm.pure(x * 2));
 
 // Filter values
-const evens = obs.filter(x => x % 2 === 0);
+const evens = rlm.filter(x => x % 2 === 0);
 
 // Merge streams
-const combined = obs1.merge(obs2);
+const combined = rlm1.merge(rlm2);
 ```
 
 ### Blueprint
 
-`Blueprint` is a synchronous-style DSL for composing Observables. All `useX` functions must be called at the top level of a Blueprint.
+`Blueprint` is a synchronous-style DSL for composing Realms. All `useX` functions must be called at the top level of a Blueprint.
 
 ```typescript
 import { Blueprint, toStore } from '@quon/core';
@@ -197,8 +204,8 @@ const app = () => {
 
 These functions are exported directly for convenience:
 
-- **`use<T>(observable: Observable<T>): T`**
-  - Shorthand for `Blueprint.use()` - uses Observable within Blueprint
+- **`use<T>(realm: Realm<T>): T`**
+  - Shorthand for `Blueprint.use()` - uses Realm within Blueprint
 
 - **`useEffect<T>(maker: (addReleasable, abortSignal) => T | Promise<T>): T`**
   - Executes side effects with cleanup
@@ -230,8 +237,8 @@ These functions are exported directly for convenience:
 
 ### Blueprint Namespace
 
-- **`Blueprint.toObservable<T>(blueprint: () => T): Observable<T>`**
-  - Converts Blueprint to Observable
+- **`Blueprint.toRealm<T>(blueprint: () => T): Realm<T>`**
+  - Converts Blueprint to Realm
 
 - **`Blueprint.createContext<T>(): Context<T>`**
   - Creates context for dependency injection
@@ -241,17 +248,17 @@ These functions are exported directly for convenience:
 
 ### Store
 
-- **`new Store<T>(observable: Observable<T>)`**
-  - Creates Store from Observable directly
+- **`new Store<T>(realm: Realm<T>)`**
+  - Creates Store from Realm directly
 
-- **`Store.newStoreObservable<T>(obs: Observable<T>): Observable<Store<T>>`**
-  - Low-level: Wraps Observable in Store, returns effect Observable
+- **`Store.newStoreRealm<T>(rlm: Realm<T>): Realm<Store<T>>`**
+  - Low-level: Wraps Realm in Store, returns effect Realm
 
-- **`Store.newCellObservable<T>(initialValue: T): Observable<[Store<T>, Setter]>`**
-  - Low-level: Single-value cell Observable
+- **`Store.newCellRealm<T>(initialValue: T): Realm<[Store<T>, Setter]>`**
+  - Low-level: Single-value cell Realm
 
-- **`Store.newPortalObservable<T>(): Observable<[Store<T>, (T) => Observable<void>]>`**
-  - Low-level: Multi-value portal Observable
+- **`Store.newPortalRealm<T>(): Realm<[Store<T>, (T) => Realm<void>]>`**
+  - Low-level: Multi-value portal Realm
 
 - **`store.peek(): Iterable<T>`**
   - Returns current values without creating dependencies
@@ -259,18 +266,18 @@ These functions are exported directly for convenience:
 - **`store.release(): Promise<void>`**
   - Releases all resources (idempotent)
 
-### Observable Methods
+### Realm Methods
 
-- **`observable.observe(observer: (value: T) => Releasable): Releasable`**
+- **`realm.instantiate(observer: (value: T) => Releasable): Releasable`**
   - Subscribe to value changes
 
-- **`observable.flatMap<U>(f: (value: T) => Observable<U>): Observable<U>`**
+- **`realm.flatMap<U>(f: (value: T) => Realm<U>): Realm<U>`**
   - Transform and flatten
 
-- **`observable.filter(predicate: (value: T) => boolean): Observable<T>`**
+- **`realm.filter(predicate: (value: T) => boolean): Realm<T>`**
   - Filter values
 
-- **`observable.merge<U>(other: Observable<U>): Observable<T | U>`**
+- **`realm.merge<U>(other: Realm<U>): Realm<T | U>`**
   - Merge two streams
 
 ### Releasable
@@ -293,7 +300,7 @@ Resources that need cleanup:
    ```typescript
    // BAD - breaks Blueprint control flow
    try {
-     const value = use(observable);
+     const value = use(realm);
    } catch (e) {
      // This will catch internal BlueprintChainException
    }
@@ -306,13 +313,13 @@ Resources that need cleanup:
    let mutableValue = 0;
    // ... somewhere else, mutableValue changes ...
    if (mutableValue > 5) {
-     const value = use(observable); // Wrong!
+     const value = use(realm); // Wrong!
    }
 
    // OK - if depends on const value
    const constValue = use(reactiveValue);
    if (constValue > 5) {
-     const value = use(observable); // This is fine
+     const value = use(realm); // This is fine
    }
    ```
 
@@ -327,7 +334,7 @@ Resources that need cleanup:
 4. ❌ **Don't use side effects outside `useEffect`**
    ```typescript
    // BAD - breaks determinism
-   const value = use(observable);
+   const value = use(realm);
    console.log(value); // Should be in useEffect
    ```
 
@@ -355,7 +362,7 @@ npm run format
 ```
 quon/
 ├── src/                  # Source code
-│   ├── observable.ts     # Observable implementation
+│   ├── realm.ts          # Realm implementation
 │   ├── blueprint.ts      # Blueprint DSL implementation
 │   ├── store.ts          # Store class for value collection management
 │   ├── releasable.ts     # Releasable interface and utilities
@@ -375,7 +382,7 @@ quon/
 - **Array-based history**: Blueprint uses array copying for execution history (benchmarked 1.13x faster than persistent Queue/LinkedList)
 - **Automatic lifecycle**: Store manages acquisition and release of value collections automatically
 - **Value collections, not single values**: Store represents a set of values that exist simultaneously, acquired and released over time
-- **Separation of concerns**: Store provides low-level Observable-based APIs; Blueprint provides convenience wrappers
+- **Separation of concerns**: Store provides low-level Realm-based APIs; Blueprint provides convenience wrappers
 
 ## License
 

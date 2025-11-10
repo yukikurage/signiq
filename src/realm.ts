@@ -1,37 +1,37 @@
 import { CompositeReleasable, Releasable } from './releasable';
 
 /**
- * A collection of observable values
- * Value additions can be monitored through the observe function
- * When an observation obtained from the observe function is released,
+ * A collection of realm values
+ * Value additions can be monitored through the instantiate function
+ * When an observation obtained from the instantiate function is released,
  * all created values are expected to be released as well
  */
-export abstract class Observable<T> {
-  public abstract observe(observer: (value: T) => Releasable): Releasable;
+export abstract class Realm<T> {
+  public abstract instantiate(observer: (value: T) => Releasable): Releasable;
 
-  public map<U>(f: (value: T) => U): Observable<U> {
-    return new BasicObservable<U>(create => {
-      return this.observe(value => {
+  public map<U>(f: (value: T) => U): Realm<U> {
+    return new BasicRealm<U>(create => {
+      return this.instantiate(value => {
         return create(f(value));
       });
     });
   }
 
-  public flatMap<U>(f: (value: T) => Observable<U>): Observable<U> {
-    return new BasicObservable<U>(create => {
-      // Observe the parent Observable
-      return this.observe(value => {
+  public flatMap<U>(f: (value: T) => Realm<U>): Realm<U> {
+    return new BasicRealm<U>(create => {
+      // Observe the parent Realm
+      return this.instantiate(value => {
         // Get and observe the child
-        return f(value).observe(v => {
+        return f(value).instantiate(v => {
           return create(v);
         });
       });
     });
   }
 
-  public filter(predicate: (value: T) => boolean): Observable<T> {
-    return new BasicObservable<T>(create => {
-      return this.observe(value => {
+  public filter(predicate: (value: T) => boolean): Realm<T> {
+    return new BasicRealm<T>(create => {
+      return this.instantiate(value => {
         if (predicate(value)) {
           return create(value);
         }
@@ -40,43 +40,43 @@ export abstract class Observable<T> {
     });
   }
 
-  public merge<U>(other: Observable<U>): Observable<T | U> {
-    return new BasicObservable<T | U>(create => {
-      const releaseLeft = this.observe(value => {
+  public merge<U>(other: Realm<U>): Realm<T | U> {
+    return new BasicRealm<T | U>(create => {
+      const releaseLeft = this.instantiate(value => {
         return create(value);
       });
-      const releaseRight = other.observe(value => {
+      const releaseRight = other.instantiate(value => {
         return create(value);
       });
       return Releasable.parallel([releaseLeft, releaseRight]);
     });
   }
 
-  public static pure<T>(value: T): BasicObservable<T> {
-    return new BasicObservable<T>(observer => {
+  public static pure<T>(value: T): BasicRealm<T> {
+    return new BasicRealm<T>(observer => {
       return observer(value);
     });
   }
 
-  public static never<T>(): BasicObservable<T> {
-    return new BasicObservable<T>(_observer => {
+  public static never<T>(): BasicRealm<T> {
+    return new BasicRealm<T>(_observer => {
       return Releasable.noop;
     });
   }
 
-  public static lazy<T>(thunk: () => Observable<T>): BasicObservable<T> {
-    return new BasicObservable<T>(observer => {
-      return thunk().observe(observer);
+  public static lazy<T>(thunk: () => Realm<T>): BasicRealm<T> {
+    return new BasicRealm<T>(observer => {
+      return thunk().instantiate(observer);
     });
   }
 }
 
 /**
- * 通常の Observable
+ * 通常の Realm
  * subscribeFunc により観測が行われる。
  * Resource safety のために、発行した値は observation の寿命と一致するようにする。
  */
-export class BasicObservable<T> extends Observable<T> {
+export class BasicRealm<T> extends Realm<T> {
   constructor(
     private readonly subscribeFunc: (
       observer: (value: T) => Releasable
@@ -85,7 +85,7 @@ export class BasicObservable<T> extends Observable<T> {
     super();
   }
 
-  public observe(observer: (value: T) => Releasable): Releasable {
+  public instantiate(observer: (value: T) => Releasable): Releasable {
     let resources: Set<{
       resource: T;
       releasable: Releasable;
@@ -138,10 +138,10 @@ export class BasicObservable<T> extends Observable<T> {
 }
 
 /**
- * Effect Observable は、一回のみ値を発火させる可能性のある Observable である。
+ * Effect Realm は、一回のみ値を発火させる可能性のある Realm である。
  * また、値が発火した場合、その寿命は observation の寿命と一致する。
  */
-export class EffectObservable<T> extends Observable<T> {
+export class EffectRealm<T> extends Realm<T> {
   constructor(
     private readonly maker: (
       addReleasable: (releasable: Releasable) => void,
@@ -195,7 +195,7 @@ export class EffectObservable<T> extends Observable<T> {
     }
   }
 
-  public observe(observer: (value: T) => Releasable): Releasable {
+  public instantiate(observer: (value: T) => Releasable): Releasable {
     const { result, releasable } = this.run();
     if (result instanceof Promise) {
       let released = false;

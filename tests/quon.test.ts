@@ -84,7 +84,7 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [valueStore, setValue] = useCell(0);
+        const [valueStore, setValue] = useCell<number>(0);
         useStore(() => {
           useLog(logs, `value: ${use(valueStore)}`);
         });
@@ -172,7 +172,7 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [valueStore, setValue] = useCell(1);
+        const [valueStore, setValue] = useCell<number>(1);
 
         useStore(() => {
           useLog(logs, `value: ${use(valueStore)}`);
@@ -203,8 +203,8 @@ describe('Blueprint basic functionality', () => {
       const logs = new LogCapture();
 
       const blueprint = () => {
-        const [value1Store, setValue1] = useCell(0);
-        const [value2Store, setValue2] = useCell(100);
+        const [value1Store, setValue1] = useCell<number>(0);
+        const [value2Store, setValue2] = useCell<number>(100);
 
         useStore(() => {
           // Depends 1st state
@@ -258,7 +258,7 @@ describe('Blueprint basic functionality', () => {
       }>();
 
       const blueprint = () => {
-        const [count, setCount] = useCell(0);
+        const [count, setCount] = useCell<number>(0);
         counterCtx.useProvider({ count, setCount });
 
         useStore(() => {

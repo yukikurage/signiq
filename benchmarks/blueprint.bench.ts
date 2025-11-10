@@ -1,15 +1,15 @@
 import Benchmark from 'benchmark';
-import { Blueprint, Observable, Store, use, useEffect } from '../src';
+import { Blueprint, Realm, Store, use, useEffect } from '../src';
 
 var suite = new Benchmark.Suite();
 
 // Blueprint with 1000 operations
 suite
-  .add('without toObservable', function () {
+  .add('without toRealm', function () {
     // 1000 operations directly
     const blueprint = () => {
       for (let i = 0; i < 1000; i++) {
-        use(Observable.pure(i));
+        use(Realm.pure(i));
       }
       return null;
     };
@@ -17,24 +17,24 @@ suite
     const store = Blueprint.toStore(blueprint);
     return store;
   })
-  .add('with toObservable', function () {
-    const observableWith10Ops = Blueprint.toObservable(() => {
+  .add('with toRealm', function () {
+    const realmWith10Ops = Blueprint.toRealm(() => {
       for (let i = 0; i < 10; i++) {
-        use(Observable.pure(i));
+        use(Realm.pure(i));
       }
       return null;
     });
 
-    const observableWith100Ops = Blueprint.toObservable(() => {
+    const realmWith100Ops = Blueprint.toRealm(() => {
       for (let i = 0; i < 10; i++) {
-        Blueprint.use(observableWith10Ops);
+        Blueprint.use(realmWith10Ops);
       }
       return null;
     });
 
     const blueprint = () => {
       for (let i = 0; i < 11; i++) {
-        Blueprint.use(observableWith100Ops);
+        Blueprint.use(realmWith100Ops);
       }
       return null;
     };
@@ -44,13 +44,13 @@ suite
   })
   .add('without blueprint', function () {
     // 1000 operations flatMapped directly
-    const observable = Array.from({ length: 1000 }, (_, i) => i).reduce<
-      Observable<number>
+    const realm = Array.from({ length: 1000 }, (_, i) => i).reduce<
+      Realm<number>
     >((acc, curr) => {
-      return acc.flatMap(() => Observable.pure(curr));
-    }, Observable.pure(0));
+      return acc.flatMap(() => Realm.pure(curr));
+    }, Realm.pure(0));
 
-    const store = new Store(observable);
+    const store = new Store(realm);
     return store;
   })
   // add listeners

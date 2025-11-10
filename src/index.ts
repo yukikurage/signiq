@@ -1,4 +1,4 @@
-export * from './observable';
+export * from './realm';
 export * from './blueprint';
 export * from './store';
 export * from './releasable';

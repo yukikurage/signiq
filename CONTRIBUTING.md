@@ -5,17 +5,17 @@ Thank you for your interest in contributing to Quon Core!
 ## Development Setup
 
 1. Clone the repository
-2. Install dependencies: `npm install`
-3. Build the project: `npm run build`
-4. Run tests: `npm test`
+2. Install dependencies: `pnpm install`
+3. Build the project: `pnpm run build`
+4. Run tests: `pnpm test`
 
 ## Development Commands
 
-- `npm run build` - Compile TypeScript
-- `npm run lint` - Check code style
-- `npm run lint:fix` - Auto-fix linting issues
-- `npm run format` - Format code with Prettier
-- `npm run format:check` - Check code formatting
+- `pnpm run build` - Compile TypeScript
+- `pnpm run lint` - Check code style
+- `pnpm run lint:fix` - Auto-fix linting issues
+- `pnpm run format` - Format code with Prettier
+- `pnpm run format:check` - Check code formatting
 
 ## Code Style
 

@@ -1,6 +1,7 @@
 import { BiLinkMap } from './bilink-map';
-import { BasicObservable, EffectObservable, Observable } from './observable';
+import { BasicRealm, EffectRealm, Realm } from './realm';
 import { CompositeReleasable, Releasable } from './releasable';
+import { Structural } from './structual';
 import { TaskQueue } from './task-queue';
 
 interface ValueInfo<T> extends Releasable {
@@ -9,13 +10,13 @@ interface ValueInfo<T> extends Releasable {
 
 /**
  * A place to store values
- * Simply viewed as Observable -> Observable transformation, but special in that
- * it calls the observe function of the passed Observable only once,
- * and uses the return value to construct a new Observable of values.
- * Memoizes Observables that are reused in various places, making initialization happen only once.
+ * Simply viewed as Realm -> Realm transformation, but special in that
+ * it calls the instantiate function of the passed Realm only once,
+ * and uses the return value to construct a new Realm of values.
+ * Memoizes Realms that are reused in various places, making initialization happen only once.
  * Also allows retrieving a list of currently held values.
  */
-export class Store<T> extends Observable<T> implements Releasable {
+export class Store<T> extends Realm<T> implements Releasable {
   private bindings = new BiLinkMap<
     ValueInfo<T>,
     (value: T) => Releasable,
@@ -26,9 +27,9 @@ export class Store<T> extends Observable<T> implements Releasable {
   private releaseThis: Releasable;
   private released = false;
 
-  constructor(observable: Observable<T>) {
+  constructor(realm: Realm<T>) {
     super();
-    this.releaseThis = observable.observe(this.create.bind(this));
+    this.releaseThis = realm.instantiate(this.create.bind(this));
   }
 
   private create(value: T): Releasable {
@@ -55,10 +56,10 @@ export class Store<T> extends Observable<T> implements Releasable {
     return [...this.values].map(v => v.value);
   }
 
-  public observe(observer: (value: T) => Releasable): Releasable {
+  public instantiate(observer: (value: T) => Releasable): Releasable {
     this.observers.add(observer);
     // Link to all existing values
-    // Note: link() is now async, but we can't await here as observe() needs to return immediately
+    // Note: link() is now async, but we can't await here as instantiate() needs to return immediately
     // The links will be established asynchronously
     [...this.values].forEach(async v => {
       const link = observer(v.value);
@@ -86,7 +87,8 @@ export class Store<T> extends Observable<T> implements Releasable {
     // Collect any errors that occurred
     const errors = results
       .filter(
-        (result): result is PromiseRejectedResult => result.status === 'rejected'
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected'
       )
       .map(result => result.reason);
 
@@ -95,7 +97,10 @@ export class Store<T> extends Observable<T> implements Releasable {
       if (errors.length === 1) {
         throw errors[0];
       } else {
-        throw new AggregateError(errors, 'Multiple errors during Store.release()');
+        throw new AggregateError(
+          errors,
+          'Multiple errors during Store.release()'
+        );
       }
     }
   }
@@ -103,33 +108,31 @@ export class Store<T> extends Observable<T> implements Releasable {
 
 export namespace Store {
   /**
-   * Wrap an Observable in a Store as an effect Observable.
+   * Wrap an Realm in a Store as an effect Realm.
    * The Store is created synchronously and returned.
    */
-  export function newStoreObservable<T>(
-    obs: Observable<T>
-  ): Observable<Store<T>> {
-    return new EffectObservable<Store<T>>((addReleasable, _abortSignal) => {
-      const store = new Store(obs);
+  export function newStoreRealm<T>(rlm: Realm<T>): Realm<Store<T>> {
+    return new EffectRealm<Store<T>>((addReleasable, _abortSignal) => {
+      const store = new Store(rlm);
       addReleasable(store);
       return store;
     });
   }
 
   /**
-   * Create an Observable that provides a single-value cell.
+   * Create an Realm that provides a single-value cell.
    * The setter replaces the current value (releases old, creates new).
    */
-  export function newCellObservable<T>(
+  export function newCellRealm<T extends Structural>(
     initialValue: T
-  ): Observable<[Store<T>, (newValue: T) => Promise<void>]> {
-    return new EffectObservable<[Store<T>, (newValue: T) => Promise<void>]>(
+  ): Realm<[Store<T>, (newValue: T) => Promise<void>]> {
+    return new EffectRealm<[Store<T>, (newValue: T) => Promise<void>]>(
       (addReleasable, _abortSignal) => {
         // Request task queue
         const tasks: TaskQueue<T> = new TaskQueue<T>();
 
         const innerStore = new Store<T>(
-          new BasicObservable<T>(observer => {
+          new BasicRealm<T>(observer => {
             let currentValue: T = initialValue;
             const valueReleasable = new CompositeReleasable();
             valueReleasable.add(observer(initialValue));
@@ -168,19 +171,19 @@ export namespace Store {
   }
 
   /**
-   * Create an Observable that provides a multi-value portal.
-   * The setter returns an Observable<void> that represents adding/removing a value.
+   * Create an Realm that provides a multi-value portal.
+   * The setter returns an Realm<void> that represents adding/removing a value.
    * Multiple values can coexist in the Store.
    */
-  export function newPortalObservable<T>(): Observable<
-    [Store<T>, (newValue: T) => Observable<void>]
+  export function newPortalRealm<T>(): Realm<
+    [Store<T>, (newValue: T) => Realm<void>]
   > {
-    return new EffectObservable<[Store<T>, (newValue: T) => Observable<void>]>(
+    return new EffectRealm<[Store<T>, (newValue: T) => Realm<void>]>(
       (addReleasable, _abortSignal) => {
         let innerCreateTunnel: (value: T) => Releasable;
 
         const innerStore: Store<T> = new Store<T>(
-          new BasicObservable<T>(observer => {
+          new BasicRealm<T>(observer => {
             // Executed synchronously by Store constructor
             innerCreateTunnel = observer;
             return Releasable.noop;
@@ -192,8 +195,8 @@ export namespace Store {
         return [
           innerStore,
           (value: T) => {
-            // Return Observable<void> that adds the value
-            return new BasicObservable<void>(create => {
+            // Return Realm<void> that adds the value
+            return new BasicRealm<void>(create => {
               const releasable = innerCreateTunnel(value);
               return Releasable.sequential([create(undefined), releasable]);
             });
@@ -202,5 +205,4 @@ export namespace Store {
       }
     );
   }
-
 }

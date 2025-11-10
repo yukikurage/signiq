@@ -1,5 +1,5 @@
 import Benchmark from 'benchmark';
-import { Blueprint, Observable } from '../src';
+import { Blueprint, Realm } from '../src';
 import { List } from 'immutable';
 
 const suite = new Benchmark.Suite();
@@ -9,11 +9,11 @@ const LOOP_COUNT = 1000;
 
 // Measure individual overhead components
 suite
-  .add('Baseline: pure Observable.pure', function () {
-    // Just Observable.pure - no Blueprint
+  .add('Baseline: pure Realm.pure', function () {
+    // Just Realm.pure - no Blueprint
     for (let i = 0; i < LOOP_COUNT; i++) {
-      const obs = Observable.pure(i);
-      obs.observe(() => ({ release: async () => {} }));
+      const rlm = Realm.pure(i);
+      rlm.instantiate(() => ({ release: async () => {} }));
     }
   })
   .add('Array copy (history simulation)', function () {
@@ -84,22 +84,22 @@ suite
     // Blueprint with 1000 use() calls
     const blueprint = () => {
       for (let i = 0; i < LOOP_COUNT; i++) {
-        Blueprint.use(Observable.pure(i));
+        Blueprint.use(Realm.pure(i));
       }
     };
-    // Must call observe() to actually execute the Blueprint
-    Blueprint.toObservable(blueprint).observe(() => ({
-      release: async () => {}
+    // Must call instantiate() to actually execute the Blueprint
+    Blueprint.toRealm(blueprint).instantiate(() => ({
+      release: async () => {},
     }));
   })
   .add('Direct flatMap: 1000 calls', function () {
-    // Direct Observable flatMap for comparison
-    let obs: Observable<number> = Observable.pure(0);
+    // Direct Realm flatMap for comparison
+    let rlm: Realm<number> = Realm.pure(0);
     for (let i = 0; i < LOOP_COUNT; i++) {
-      obs = obs.flatMap(() => Observable.pure(i));
+      rlm = rlm.flatMap(() => Realm.pure(i));
     }
-    // Must also call observe() for fair comparison
-    obs.observe(() => ({ release: async () => {} }));
+    // Must also call instantiate() for fair comparison
+    rlm.instantiate(() => ({ release: async () => {} }));
   })
   .on('cycle', function (event: Benchmark.Event) {
     console.log(String(event.target));

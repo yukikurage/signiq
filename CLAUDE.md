@@ -4,32 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-- **Build**: `npm run build` - Compiles TypeScript to JavaScript in `dist/`
-- **Test**: `npm test` - Runs tests using Node.js test runner
-- **Test Watch**: `npm run test:watch` - Runs tests in watch mode
-- **Examples**: `npm run examples` - Runs example code
-- **Lint**: `npm run lint` - Runs ESLint on TypeScript files
-- **Lint Fix**: `npm run lint:fix` - Fixes auto-fixable ESLint issues
-- **Format**: `npm run format` - Formats code with Prettier
-- **Format Check**: `npm run format:check` - Checks code formatting
+- **Build**: `pnpm run build` - Compiles TypeScript to JavaScript in `dist/`
+- **Test**: `pnpm test` - Runs tests using Node.js test runner
+- **Test Watch**: `pnpm run test:watch` - Runs tests in watch mode
+- **Examples**: `pnpm run examples` - Runs example code
+- **Lint**: `pnpm run lint` - Runs ESLint on TypeScript files
+- **Lint Fix**: `pnpm run lint:fix` - Fixes auto-fixable ESLint issues
+- **Format**: `pnpm run format` - Formats code with Prettier
+- **Format Check**: `pnpm run format:check` - Checks code formatting
 
 ## Architecture
 
-This is a reactive programming library built around **Observable**, **Blueprint**, and **Store** - providing a declarative API for managing reactive state and side effects with automatic cleanup.
+This is a reactive programming library built around **Realm**, **Blueprint**, and **Store** - providing a declarative API for managing reactive state and side effects with automatic cleanup.
 
 ### Core Concepts
 
-- **Observable**: Represents a stream of values over time that can be observed
-- **Blueprint**: A synchronous-style DSL for composing Observables using flatMap chains
-- **Store**: Manages multiple values from an Observable with automatic lifecycle management
+- **Realm**: Represents a space where resources are created and released
+- **Blueprint**: A synchronous-style DSL for composing Realms using flatMap chains
+- **Store**: Manages multiple values from an Realm with automatic lifecycle management
 - **Releasable**: Interface for resources that need cleanup, released in proper order
 - **Context**: Type-safe dependency injection system for Blueprints
 
 ### Key Files
 
-- `src/observable.ts`: Core Observable implementation
+- `src/realm.ts`: Core Realm implementation
 - `src/blueprint.ts`: Blueprint DSL implementation
-- `src/store.ts`: Store class for managing Observable values with lifecycle
+- `src/store.ts`: Store class for managing Realm values with lifecycle
 - `src/releasable.ts`: Releasable interface and composition utilities
 - `src/bilink-map.ts`: Bidirectional map for managing Observer-Value relationships
 - `src/task-queue.ts`: Task queue for managing async operations
@@ -38,38 +38,38 @@ This is a reactive programming library built around **Observable**, **Blueprint*
 
 ### Reactive System
 
-The library uses an Observable-based execution model where:
+The library uses an Realm-based execution model where:
 
-1. **Observables** represent streams of values that can be transformed and combined
-2. **Blueprint** provides a synchronous-style DSL where `useX` functions chain Observables via flatMap
-3. **Store** manages multiple concurrent values from an Observable, each with its own lifecycle
+1. **Realms** represent streams of values that can be transformed and combined
+2. **Blueprint** provides a synchronous-style DSL where `useX` functions chain Realms via flatMap
+3. **Store** manages multiple concurrent values from an Realm, each with its own lifecycle
 4. **Releasables** handle cleanup in reverse order of creation
 5. **Context API** provides type-safe dependency injection using symbols
 
 ### API Conventions
 
-#### Observable
+#### Realm
 
-- **`Observable<T>`**: Base class for reactive value streams
-  - `observe(observer: (value: T) => Releasable): Releasable` - Subscribe to value changes
-  - `map<U>(f: (value: T) => U): Observable<U>` - Transform values
-  - `flatMap<U>(f: (value: T) => Observable<U>): Observable<U>` - Transform and flatten
-  - `filter(predicate: (value: T) => boolean): Observable<T>` - Filter values
-  - `merge<U>(other: Observable<U>): Observable<T | U>` - Merge two streams
-  - `Observable.pure<T>(value: T)` - Create Observable with single value
-  - `Observable.never<T>()` - Create Observable that emits nothing
+- **`Realm<T>`**: Base class for reactive value streams
+  - `instantiate(observer: (value: T) => Releasable): Releasable` - Subscribe to value changes
+  - `map<U>(f: (value: T) => U): Realm<U>` - Transform values
+  - `flatMap<U>(f: (value: T) => Realm<U>): Realm<U>` - Transform and flatten
+  - `filter(predicate: (value: T) => boolean): Realm<T>` - Filter values
+  - `merge<U>(other: Realm<U>): Realm<T | U>` - Merge two streams
+  - `Realm.pure<T>(value: T)` - Create Realm with single value
+  - `Realm.never<T>()` - Create Realm that emits nothing
 
 #### Blueprint
 
-Blueprints are synchronous-style functions that compose Observables. All `useX` functions must be called at the top level of a Blueprint (not inside conditionals, loops, or callbacks).
+Blueprints are synchronous-style functions that compose Realms. All `useX` functions must be called at the top level of a Blueprint (not inside conditionals, loops, or callbacks).
 
 **Core Blueprint APIs:**
 
-- **`Blueprint.toObservable<T>(blueprint: () => T, userCtx?: UserContext): Observable<T>`**
-  - Converts a Blueprint function into an Observable
+- **`Blueprint.toRealm<T>(blueprint: () => T, userCtx?: UserContext): Realm<T>`**
+  - Converts a Blueprint function into an Realm
 
-- **`Blueprint.use<T>(observable: Observable<T>): T`** (also exported as `use()`)
-  - Uses an Observable within a Blueprint (creates flatMap chain)
+- **`Blueprint.use<T>(realm: Realm<T>): T`** (also exported as `use()`)
+  - Uses an Realm within a Blueprint (creates flatMap chain)
   - Throws `BlueprintChainException` internally for control flow
 
 - **`Blueprint.useEffect<T>(maker: (addReleasable, abortSignal) => T | Promise<T>): T`** (also exported as `useEffect()`)
@@ -122,8 +122,8 @@ Blueprints are synchronous-style functions that compose Observables. All `useX` 
 
 **Store Class:**
 
-- **`new Store<T>(observable: Observable<T>)`**
-  - Creates a Store that manages multiple values from an Observable
+- **`new Store<T>(realm: Realm<T>)`**
+  - Creates a Store that manages multiple values from an Realm
   - Each value gets its own lifecycle (Releasable)
 
 - **`store.peek(): Iterable<T>`**
@@ -132,22 +132,22 @@ Blueprints are synchronous-style functions that compose Observables. All `useX` 
 - **`store.release(): Promise<void>`**
   - Releases all resources (idempotent)
 
-**Low-level Store Factory Functions (Observable-based):**
+**Low-level Store Factory Functions (Realm-based):**
 
-These functions are Blueprint-independent and return Observables. They are the foundation for Blueprint convenience wrappers.
+These functions are Blueprint-independent and return Realms. They are the foundation for Blueprint convenience wrappers.
 
-- **`Store.newStoreObservable<T>(obs: Observable<T>): Observable<Store<T>>`**
-  - Wrap an Observable in a Store as an effect Observable
+- **`Store.newStoreRealm<T>(rlm: Realm<T>): Realm<Store<T>>`**
+  - Wrap an Realm in a Store as an effect Realm
   - The Store is created synchronously and returned
 
-- **`Store.newCellObservable<T>(initialValue: T): Observable<[Store<T>, (newValue: T) => Promise<void>]>`**
-  - Create an Observable that provides a single-value cell
+- **`Store.newCellRealm<T>(initialValue: T): Realm<[Store<T>, (newValue: T) => Promise<void>]>`**
+  - Create an Realm that provides a single-value cell
   - The setter replaces the current value (releases old, creates new)
   - Skips duplicates and queued values
 
-- **`Store.newPortalObservable<T>(): Observable<[Store<T>, (newValue: T) => Observable<void>]>`**
-  - Create an Observable that provides a multi-value portal
-  - The setter returns an Observable<void> that represents adding/removing a value
+- **`Store.newPortalRealm<T>(): Realm<[Store<T>, (newValue: T) => Realm<void>]>`**
+  - Create an Realm that provides a multi-value portal
+  - The setter returns an Realm<void> that represents adding/removing a value
   - Multiple values can coexist in the Store
 
 #### Releasable
@@ -167,10 +167,10 @@ These functions are Blueprint-independent and return Observables. They are the f
 2. **Side effects must use `useEffect`**: All I/O, console.log, timers, etc.
 3. **Cleanup via releasables**: Use `addReleasable()` to register cleanup (cleared in reverse order)
 4. **Never catch exceptions across `use()` boundaries**: BlueprintChainException is used for control flow internally
-5. **Store manages multiple values**: Each value from Observable gets independent lifecycle
+5. **Store manages multiple values**: Each value from Realm gets independent lifecycle
 6. **Context is Blueprint-scoped**: Use `useProvider()` in parent, `useConsumer()` in child
-7. **Separation of concerns**: Store provides low-level Observable-based APIs; Blueprint provides convenience wrappers
-8. **No circular dependencies**: Store → Observable (no Blueprint dependency), Blueprint → Store (one-way dependency)
+7. **Separation of concerns**: Store provides low-level Realm-based APIs; Blueprint provides convenience wrappers
+8. **No circular dependencies**: Store → Realm (no Blueprint dependency), Blueprint → Store (one-way dependency)
 
 ### Design Constraints
 
@@ -178,7 +178,7 @@ These functions are Blueprint-independent and return Observables. They are the f
 2. **Exception-based control flow**: `BlueprintChainException` is thrown internally to implement continuations
 3. **Global context during Blueprint execution**: `BLUEPRINT_GLOBAL_CONTEXT` is set/restored synchronously
 4. **Array-based history**: Blueprint uses array copying for execution history (benchmarked 1.13x faster than persistent Queue/LinkedList)
-5. **Observable-first design**: Store factory functions return Observables, Blueprint provides wrappers
+5. **Realm-first design**: Store factory functions return Realms, Blueprint provides wrappers
 
 ## Code Style
 
@@ -214,7 +214,15 @@ Following React's design pattern, frequently used functions are re-exported dire
 
 ```typescript
 // These work without the Blueprint. prefix:
-import { use, useEffect, useTimeout, useCell, usePortal, useStore, toStore } from '@quon/core';
+import {
+  use,
+  useEffect,
+  useTimeout,
+  useCell,
+  usePortal,
+  useStore,
+  toStore,
+} from '@quon/core';
 
 // Less common functions still use the namespace:
 import { Blueprint } from '@quon/core';
@@ -224,18 +232,21 @@ Blueprint.useUserContext();
 
 ### Two-Layer API Design
 
-**Store Module (Low-level, Observable-based):**
-- `Store.newStoreObservable()` - Returns `Observable<Store<T>>`
-- `Store.newCellObservable()` - Returns `Observable<[Store<T>, Setter]>`
-- `Store.newPortalObservable()` - Returns `Observable<[Store<T>, (T) => Observable<void>]>`
+**Store Module (Low-level, Realm-based):**
+
+- `Store.newStoreRealm()` - Returns `Realm<Store<T>>`
+- `Store.newCellRealm()` - Returns `Realm<[Store<T>, Setter]>`
+- `Store.newPortalRealm()` - Returns `Realm<[Store<T>, (T) => Realm<void>]>`
 
 **Blueprint Module (High-level, Convenience):**
-- `Blueprint.toStore()` / `toStore()` - Uses `toObservable()` + `new Store()`
-- `Blueprint.useStore()` / `useStore()` - Uses `newStoreObservable()` + `use()`
-- `Blueprint.useCell()` / `useCell()` - Uses `newCellObservable()` + `use()`
-- `Blueprint.usePortal()` / `usePortal()` - Uses `newPortalObservable()` + `use()` + `map()`
+
+- `Blueprint.toStore()` / `toStore()` - Uses `toRealm()` + `new Store()`
+- `Blueprint.useStore()` / `useStore()` - Uses `newStoreRealm()` + `use()`
+- `Blueprint.useCell()` / `useCell()` - Uses `newCellRealm()` + `use()`
+- `Blueprint.usePortal()` / `usePortal()` - Uses `newPortalRealm()` + `use()` + `map()`
 
 This separation ensures:
+
 1. Store has no Blueprint dependency (no circular deps)
-2. Observable-based APIs are composable and testable
+2. Realm-based APIs are composable and testable
 3. Blueprint provides ergonomic wrappers for common use cases
