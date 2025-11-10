@@ -302,7 +302,7 @@ Resources that need cleanup:
    try {
      const value = use(realm);
    } catch (e) {
-     // This will catch internal BlueprintChainException
+     // This will catch internal BLUEPRINT_CHAIN_EXCEPTION_SYMBOL
    }
    ```
 

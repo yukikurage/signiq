@@ -1,7 +1,7 @@
 import { BiLinkMap } from './bilink-map';
 import { BasicRealm, EffectRealm, Realm } from './realm';
 import { CompositeReleasable, Releasable } from './releasable';
-import { Structural } from './structual';
+import { Structural } from './structural';
 import { TaskQueue } from './task-queue';
 
 interface ValueInfo<T> extends Releasable {

@@ -2,7 +2,7 @@ import { BasicReleasable, CompositeReleasable, Releasable } from './releasable';
 import { BasicRealm, EffectRealm, Realm } from './realm';
 import { Store } from './store';
 import { is, List } from 'immutable';
-import { Structural } from './structual';
+import { Structural } from './structural';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BlueprintResult = any;
