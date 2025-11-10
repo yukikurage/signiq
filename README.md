@@ -68,7 +68,7 @@ const store = toStore(counterApp);
 import { Realm } from '@quon/core';
 
 // Create from a value
-const = Realm.pure(42);
+const rlm = Realm.pure(42);
 
 // Transform values
 const doubled = rlm.flatMap(x => Realm.pure(x * 2));
@@ -379,7 +379,6 @@ quon/
 
 - **Synchronous Blueprint execution**: Blueprints run synchronously until a `use()` call, then re-execute from the beginning when dependencies change
 - **Exception-based control flow**: `BlueprintChainException` is used internally for continuations
-- **Array-based history**: Blueprint uses array copying for execution history (benchmarked 1.13x faster than persistent Queue/LinkedList)
 - **Automatic lifecycle**: Store manages acquisition and release of value collections automatically
 - **Value collections, not single values**: Store represents a set of values that exist simultaneously, acquired and released over time
 - **Separation of concerns**: Store provides low-level Realm-based APIs; Blueprint provides convenience wrappers
