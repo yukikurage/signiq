@@ -1,4 +1,4 @@
-import type { Releasable } from './releasable';
+import type { Resource } from './resource';
 
 export class TaskQueue<Task, Result = void> {
   private queue: Array<{
@@ -27,7 +27,7 @@ export class TaskQueue<Task, Result = void> {
   }
 
   // Set handler later and launch
-  public launch(handler: (task: Task) => Promise<Result>): Releasable {
+  public launch(handler: (task: Task) => Promise<Result>): Resource {
     this.handler = handler;
     this.launched = true;
     this.stopped = false;

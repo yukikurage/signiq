@@ -1,6 +1,6 @@
-import { Releasable } from './releasable';
+import { Resource } from './resource';
 
-export class BiLinkMap<A, B, L extends Releasable> {
+export class BiLinkMap<A, B, L extends Resource> {
   private aToB = new Map<A, Map<B, L>>();
   private bToA = new Map<B, Map<A, L>>();
 

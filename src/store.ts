@@ -1,10 +1,8 @@
 import { BiLinkMap } from './bilink-map';
 import { BasicRealm, EffectRealm, Realm } from './realm';
-import { CompositeReleasable, Releasable } from './releasable';
-import { Structural } from './structural';
-import { TaskQueue } from './task-queue';
+import { Resource } from './resource';
 
-interface ValueInfo<T> extends Releasable {
+interface ValueInfo<T> extends Resource {
   value: T;
 }
 
@@ -16,15 +14,15 @@ interface ValueInfo<T> extends Releasable {
  * Memoizes Realms that are reused in various places, making initialization happen only once.
  * Also allows retrieving a list of currently held values.
  */
-export class Store<T> extends Realm<T> implements Releasable {
+export class Store<T> extends Realm<T> implements Resource {
   private bindings = new BiLinkMap<
     ValueInfo<T>,
-    (value: T) => Releasable,
-    Releasable
+    (value: T) => Resource,
+    Resource
   >();
   private values = new Set<ValueInfo<T>>();
-  private observers = new Set<(value: T) => Releasable>();
-  private releaseThis: Releasable;
+  private observers = new Set<(value: T) => Resource>();
+  private releaseThis: Resource;
   private released = false;
 
   constructor(realm: Realm<T>) {
@@ -32,7 +30,7 @@ export class Store<T> extends Realm<T> implements Releasable {
     this.releaseThis = realm.instantiate(this.create.bind(this));
   }
 
-  private create(value: T): Releasable {
+  private create(value: T): Resource {
     const v: ValueInfo<T> = {
       value,
       release: async () => {
@@ -56,7 +54,7 @@ export class Store<T> extends Realm<T> implements Releasable {
     return [...this.values].map(v => v.value);
   }
 
-  public instantiate(observer: (value: T) => Releasable): Releasable {
+  public instantiate(observer: (value: T) => Resource): Resource {
     this.observers.add(observer);
     // Link to all existing values
     // Note: link() is now async, but we can't await here as instantiate() needs to return immediately
@@ -112,75 +110,10 @@ export namespace Store {
    * The Store is created synchronously and returned.
    */
   export function newStoreRealm<T>(rlm: Realm<T>): Realm<Store<T>> {
-    return new EffectRealm<Store<T>>((addReleasable, _abortSignal) => {
+    return new EffectRealm<Store<T>>((addResource, _abortSignal) => {
       const store = new Store(rlm);
-      addReleasable(store);
+      addResource(store);
       return store;
-    });
-  }
-
-  /**
-   * Create an Realm that provides a single-value cell.
-   * The setter replaces the current value (releases old, creates new).
-   */
-  export function newCellRealm<T extends Structural>(
-    initialValue: T
-  ): Realm<[Store<T>, (update: T | ((prevValue: T) => T)) => Promise<void>]> {
-    return new EffectRealm<
-      [Store<T>, (update: T | ((prevValue: T) => T)) => Promise<void>]
-    >((addReleasable, _abortSignal) => {
-      // Request task queue
-      const tasks: TaskQueue<(prevValue: T) => T> = new TaskQueue<
-        (prevValue: T) => T
-      >();
-
-      const innerStore = new Store<T>(
-        new BasicRealm<T>(observer => {
-          let currentValue: T = initialValue;
-          const valueReleasable = new CompositeReleasable();
-          valueReleasable.add(observer(initialValue));
-
-          // Launch Tasks
-          const releaseTaskProcess = tasks.launch(async task => {
-            // Get queued tasks to check if there are more recent updates
-            const remainedTasks = tasks.getRemainingTasks();
-            // Skip this task if:
-            // 1. There are newer tasks queued (optimize by jumping to the latest)
-            // 2. The value hasn't changed (deduplicate)
-            if (remainedTasks.length > 0) {
-              return;
-            }
-            const newValue = task(currentValue);
-            if (newValue === currentValue) {
-              return;
-            }
-
-            // Release previous value
-            await valueReleasable.release();
-            // Create new value
-            currentValue = newValue;
-            valueReleasable.add(observer(currentValue));
-          });
-          return Releasable.parallel([releaseTaskProcess, valueReleasable]);
-        })
-      );
-
-      addReleasable(innerStore);
-
-      return [
-        innerStore,
-        async (update: T | ((prevValue: T) => T)) => {
-          await tasks.enqueue(prevValue => {
-            if (typeof update === 'function') {
-              // Function update
-              return (update as (prevValue: T) => T)(prevValue);
-            } else {
-              // Direct value update
-              return update;
-            }
-          });
-        },
-      ];
     });
   }
 
@@ -193,26 +126,26 @@ export namespace Store {
     [Store<T>, (newValue: T) => Realm<void>]
   > {
     return new EffectRealm<[Store<T>, (newValue: T) => Realm<void>]>(
-      (addReleasable, _abortSignal) => {
-        let innerCreateTunnel: (value: T) => Releasable;
+      (addResource, _abortSignal) => {
+        let innerCreateTunnel: (value: T) => Resource;
 
         const innerStore: Store<T> = new Store<T>(
           new BasicRealm<T>(observer => {
             // Executed synchronously by Store constructor
             innerCreateTunnel = observer;
-            return Releasable.noop;
+            return Resource.noop;
           })
         );
 
-        addReleasable(innerStore);
+        addResource(innerStore);
 
         return [
           innerStore,
           (value: T) => {
             // Return Realm<void> that adds the value
             return new BasicRealm<void>(create => {
-              const releasable = innerCreateTunnel(value);
-              return Releasable.sequential([create(undefined), releasable]);
+              const resource = innerCreateTunnel(value);
+              return Resource.sequential([create(undefined), resource]);
             });
           },
         ];

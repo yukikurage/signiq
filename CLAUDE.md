@@ -22,7 +22,7 @@ This is a reactive programming library built around **Realm**, **Blueprint**, an
 - **Realm**: Represents a space where resources are created and released
 - **Blueprint**: A synchronous-style DSL for composing Realms using flatMap chains
 - **Store**: Manages multiple values from an Realm with automatic lifecycle management
-- **Releasable**: Interface for resources that need cleanup, released in proper order
+- **Resource**: Interface for resources that need cleanup, released in proper order
 - **Context**: Type-safe dependency injection system for Blueprints
 
 ### Key Files
@@ -30,7 +30,7 @@ This is a reactive programming library built around **Realm**, **Blueprint**, an
 - `src/realm.ts`: Core Realm implementation
 - `src/blueprint.ts`: Blueprint DSL implementation
 - `src/store.ts`: Store class for managing Realm values with lifecycle
-- `src/releasable.ts`: Releasable interface and composition utilities
+- `src/resource.ts`: Resource interface and composition utilities
 - `src/bilink-map.ts`: Bidirectional map for managing Observer-Value relationships
 - `src/task-queue.ts`: Task queue for managing async operations
 - `src/index.ts`: Main entry point that exports all public APIs + convenience re-exports
@@ -43,7 +43,7 @@ The library uses an Realm-based execution model where:
 1. **Realms** represent streams of values that can be transformed and combined
 2. **Blueprint** provides a synchronous-style DSL where `useX` functions chain Realms via flatMap
 3. **Store** manages multiple concurrent values from an Realm, each with its own lifecycle
-4. **Releasables** handle cleanup in reverse order of creation
+4. **Resources** handle cleanup in reverse order of creation
 5. **Context API** provides type-safe dependency injection using symbols
 
 ### API Conventions
@@ -51,7 +51,7 @@ The library uses an Realm-based execution model where:
 #### Realm
 
 - **`Realm<T>`**: Base class for reactive value streams
-  - `instantiate(observer: (value: T) => Releasable): Releasable` - Subscribe to value changes
+  - `instantiate(observer: (value: T) => Resource): Resource` - Subscribe to value changes
   - `map<U>(f: (value: T) => U): Realm<U>` - Transform values
   - `flatMap<U>(f: (value: T) => Realm<U>): Realm<U>` - Transform and flatten
   - `filter(predicate: (value: T) => boolean): Realm<T>` - Filter values
@@ -72,9 +72,9 @@ Blueprints are synchronous-style functions that compose Realms. All `useX` funct
   - Uses an Realm within a Blueprint (creates flatMap chain)
   - Throws `BlueprintChainException` internally for control flow
 
-- **`Blueprint.useEffect<T>(maker: (addReleasable, abortSignal) => T | Promise<T>): T`** (also exported as `useEffect()`)
+- **`Blueprint.useEffect<T>(maker: (addResource, abortSignal) => T | Promise<T>): T`** (also exported as `useEffect()`)
   - Executes side effects with proper cleanup
-  - Use `addReleasable()` to register cleanup functions
+  - Use `addResource()` to register cleanup functions
   - `abortSignal` indicates when the effect is being cancelled
   - Should be used for all I/O, timers, console.log, and other side effects
 
@@ -124,7 +124,7 @@ Blueprints are synchronous-style functions that compose Realms. All `useX` funct
 
 - **`new Store<T>(realm: Realm<T>)`**
   - Creates a Store that manages multiple values from an Realm
-  - Each value gets its own lifecycle (Releasable)
+  - Each value gets its own lifecycle (Resource)
 
 - **`store.peek(): Iterable<T>`**
   - Returns current values without creating dependencies
@@ -150,22 +150,22 @@ These functions are Blueprint-independent and return Realms. They are the founda
   - The setter returns an Realm<void> that represents adding/removing a value
   - Multiple values can coexist in the Store
 
-#### Releasable
+#### Resource
 
-- **`Releasable.parallel(set: Iterable<Releasable>): Releasable`**
+- **`Resource.parallel(set: Iterable<Resource>): Resource`**
   - Releases all in parallel (uses Promise.allSettled)
 
-- **`Releasable.sequential(set: Iterable<Releasable>): Releasable`**
+- **`Resource.sequential(set: Iterable<Resource>): Resource`**
   - Releases in order (awaits each)
 
-- **`Releasable.noop`**
-  - No-op releasable
+- **`Resource.noop`**
+  - No-op resource
 
 ### Important Patterns
 
 1. **All `useX` functions must be called at Blueprint top level**: Don't call inside if/loops/callbacks
 2. **Side effects must use `useEffect`**: All I/O, console.log, timers, etc.
-3. **Cleanup via releasables**: Use `addReleasable()` to register cleanup (cleared in reverse order)
+3. **Cleanup via resources**: Use `addResource()` to register cleanup (cleared in reverse order)
 4. **Never catch exceptions across `use()` boundaries**: BlueprintChainException is used for control flow internally
 5. **Store manages multiple values**: Each value from Realm gets independent lifecycle
 6. **Context is Blueprint-scoped**: Use `useProvider()` in parent, `useConsumer()` in child

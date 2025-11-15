@@ -1,7 +1,7 @@
 export * from './realm';
 export * from './blueprint';
 export * from './store';
-export * from './releasable';
+export * from './resource';
 
 // Convenience re-exports for frequently used functions (React-like design)
 import { Blueprint as B } from './blueprint';

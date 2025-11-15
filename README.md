@@ -207,7 +207,7 @@ These functions are exported directly for convenience:
 - **`use<T>(realm: Realm<T>): T`**
   - Shorthand for `Blueprint.use()` - uses Realm within Blueprint
 
-- **`useEffect<T>(maker: (addReleasable, abortSignal) => T | Promise<T>): T`**
+- **`useEffect<T>(maker: (addResource, abortSignal) => T | Promise<T>): T`**
   - Executes side effects with cleanup
   - Use for all I/O, console.log, timers, etc.
 
@@ -268,7 +268,7 @@ These functions are exported directly for convenience:
 
 ### Realm Methods
 
-- **`realm.instantiate(observer: (value: T) => Releasable): Releasable`**
+- **`realm.instantiate(observer: (value: T) => Resource): Resource`**
   - Subscribe to value changes
 
 - **`realm.flatMap<U>(f: (value: T) => Realm<U>): Realm<U>`**
@@ -280,18 +280,18 @@ These functions are exported directly for convenience:
 - **`realm.merge<U>(other: Realm<U>): Realm<T | U>`**
   - Merge two streams
 
-### Releasable
+### Resource
 
 Resources that need cleanup:
 
-- **`Releasable.parallel(set: Iterable<Releasable>): Releasable`**
+- **`Resource.parallel(set: Iterable<Resource>): Resource`**
   - Releases all in parallel
 
-- **`Releasable.sequential(set: Iterable<Releasable>): Releasable`**
+- **`Resource.sequential(set: Iterable<Resource>): Resource`**
   - Releases in order
 
-- **`Releasable.noop`**
-  - No-op releasable
+- **`Resource.noop`**
+  - No-op resource
 
 ## Common Pitfalls
 
@@ -365,7 +365,7 @@ quon/
 │   ├── realm.ts          # Realm implementation
 │   ├── blueprint.ts      # Blueprint DSL implementation
 │   ├── store.ts          # Store class for value collection management
-│   ├── releasable.ts     # Releasable interface and utilities
+│   ├── resource.ts     # Resource interface and utilities
 │   ├── bilink-map.ts     # Bidirectional map for observers/values
 │   ├── task-queue.ts     # Task queue for async operations
 │   └── index.ts          # Public exports + convenience re-exports

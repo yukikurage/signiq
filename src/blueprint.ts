@@ -1,5 +1,5 @@
-import { BasicReleasable, CompositeReleasable, Releasable } from './releasable';
-import { BasicRealm, EffectRealm, Realm } from './realm';
+import { BasicResource, CompositeResource, Resource } from './resource';
+import { BasicRealm, CellRealm, EffectRealm, Realm } from './realm';
 import { Store } from './store';
 import { is, List } from 'immutable';
 import { Structural } from './structural';
@@ -18,11 +18,6 @@ let BLUEPRINT_GLOBAL_CONTEXT: BLUEPRINT_GLOBAL_CONTEXT_TYPE | undefined =
   undefined;
 
 const BLUEPRINT_CHAIN_EXCEPTION_SYMBOL = Symbol('BlueprintChainException');
-
-class BlueprintChainException {
-  public readonly [BLUEPRINT_CHAIN_EXCEPTION_SYMBOL]: true = true;
-  constructor(public readonly releasable: Releasable) {}
-}
 
 export namespace Blueprint {
   export type Context<T> = {
@@ -45,12 +40,12 @@ export namespace Blueprint {
   function provideContext<T>(key: symbol, value: T): void {
     const global = getBlueprintGlobalContext();
     useRealm(
-      new EffectRealm<void>((addReleasable, _abortSignal) => {
+      new EffectRealm<void>((addResource, _abortSignal) => {
         const temp = global.getUserCtx()[key];
         global.getUserCtx()[key] = value;
 
-        addReleasable(
-          new BasicReleasable(async () => {
+        addResource(
+          new BasicResource(async () => {
             if (temp === undefined) {
               delete global.getUserCtx()[key];
             } else {
@@ -114,15 +109,14 @@ export namespace Blueprint {
     // この関数自体は同期的であることに注意。
     function observeBlueprint(
       initialHistory: List<BlueprintResult>,
-      create: (value: T) => Releasable
-    ): Releasable {
+      create: (value: T) => Resource
+    ): Resource {
       let history = initialHistory; // let で管理して同期実行時に伸ばす
       let currentIndex = 0;
 
-      // 同期的な releasable を保持するための CompositeReleasable
-      const syncResultReleasable: CompositeReleasable =
-        new CompositeReleasable();
-      let currentResultReleasable: CompositeReleasable = syncResultReleasable;
+      // 同期的な resource を保持するための CompositeResource
+      const syncResultResource: CompositeResource = new CompositeResource();
+      let currentResultResource: CompositeResource = syncResultResource;
 
       // Function to chain Realms
       function use<U>(realm: Realm<U>): U {
@@ -135,8 +129,8 @@ export namespace Blueprint {
           const currentHistory = history;
           const observeCont = (
             v: U,
-            create: (value: T) => Releasable
-          ): Releasable => {
+            create: (value: T) => Resource
+          ): Resource => {
             // Immutable.List approach: O(log n) persistent append
             return observeBlueprint(currentHistory.push(v), create);
           };
@@ -145,21 +139,21 @@ export namespace Blueprint {
             | {
                 tag: 'DONE';
                 result: U;
-                nextCurrentResultReleasable: CompositeReleasable;
+                nextCurrentResultResource: CompositeResource;
               }
             | {
                 tag: 'ASYNC';
               };
-          const observer = (v: U): Releasable => {
+          const observer = (v: U): Resource => {
             if (!syncResult) {
-              // nextCurrentResultReleasable を更新する
-              const releasable = new CompositeReleasable();
+              // nextCurrentResultResource を更新する
+              const resource = new CompositeResource();
               syncResult = {
                 tag: 'DONE',
                 result: v,
-                nextCurrentResultReleasable: releasable,
+                nextCurrentResultResource: resource,
               };
-              return releasable;
+              return resource;
             } else {
               // 非同期 (または二回目以降の) 呼び出し
               return observeCont(v, create);
@@ -169,8 +163,8 @@ export namespace Blueprint {
           const observation = realm.instantiate(observer);
 
           if (syncResult?.tag === 'DONE') {
-            currentResultReleasable.add(observation);
-            currentResultReleasable = syncResult.nextCurrentResultReleasable;
+            currentResultResource.add(observation);
+            currentResultResource = syncResult.nextCurrentResultResource;
             const result = syncResult.result;
             history = history.push(result);
             currentIndex++;
@@ -179,7 +173,7 @@ export namespace Blueprint {
           } else {
             // 非同期
             syncResult = { tag: 'ASYNC' };
-            currentResultReleasable.add(observation);
+            currentResultResource.add(observation);
             throw BLUEPRINT_CHAIN_EXCEPTION_SYMBOL;
           }
           // }
@@ -195,12 +189,12 @@ export namespace Blueprint {
       try {
         const result = blueprint();
         BLUEPRINT_GLOBAL_CONTEXT = temp;
-        currentResultReleasable.add(create(result));
-        return syncResultReleasable;
+        currentResultResource.add(create(result));
+        return syncResultResource;
       } catch (e) {
         BLUEPRINT_GLOBAL_CONTEXT = temp;
         if (e === BLUEPRINT_CHAIN_EXCEPTION_SYMBOL) {
-          return syncResultReleasable;
+          return syncResultResource;
         }
         // If user code caught and re-threw a BlueprintChainException,
         // or if this is a genuine user error, re-throw it
@@ -230,7 +224,7 @@ export namespace Blueprint {
     return useRealm(
       new BasicRealm<void>(create => {
         if (!predicate()) {
-          return Releasable.noop;
+          return Resource.noop;
         }
         return create(undefined);
       })
@@ -240,12 +234,12 @@ export namespace Blueprint {
   export function useIterable<T>(iterable: Iterable<T>): T {
     return useRealm(
       new BasicRealm<T>(create => {
-        const releasables: Releasable[] = [];
+        const resources: Resource[] = [];
         for (const value of iterable) {
           const r = create(value);
-          releasables.push(r);
+          resources.push(r);
         }
-        return Releasable.sequential(releasables.reverse());
+        return Resource.sequential(resources.reverse());
       })
     );
   }
@@ -261,20 +255,20 @@ export namespace Blueprint {
 
   export function useEffect<T>(
     maker: (
-      addReleasable: (releasable: Releasable) => void,
+      addResource: (resource: Resource) => void,
       abortSignal: AbortSignal
     ) => Promise<T> | T
   ): T {
     return useRealm(
-      new EffectRealm<T>((addReleasable, abortSignal) => {
-        return maker(addReleasable, abortSignal);
+      new EffectRealm<T>((addResource, abortSignal) => {
+        return maker(addResource, abortSignal);
       })
     );
   }
 
   export function useTimeout(delayMs: number): void {
     return useRealm(
-      new EffectRealm<void>((addReleasable, abortSignal) => {
+      new EffectRealm<void>((addResource, abortSignal) => {
         return new Promise<void>(resolve => {
           const timeout = setTimeout(() => {
             if (!abortSignal.aborted) {
@@ -282,7 +276,7 @@ export namespace Blueprint {
             }
           }, delayMs);
 
-          addReleasable({
+          addResource({
             release: async () => {
               clearTimeout(timeout);
             },
@@ -319,10 +313,14 @@ export namespace Blueprint {
    * The setter replaces the current value (releases old, creates new).
    * This is a convenience wrapper around Store.newCellRealm().
    */
-  export function useCell<T extends Structural>(
-    initialValue: T
-  ): [Store<T>, (update: T | ((prevValue: T) => T)) => Promise<void>] {
-    return Blueprint.use(Store.newCellRealm(initialValue));
+  export function useCell<T extends Structural>(initialValue: T): CellRealm<T> {
+    return Blueprint.use(
+      new EffectRealm<CellRealm<T>>((addResource, _abortSignal) => {
+        const cell = new CellRealm(initialValue);
+        addResource(cell);
+        return cell;
+      })
+    );
   }
 
   /**
@@ -340,5 +338,58 @@ export namespace Blueprint {
         },
       ])
     );
+  }
+
+  export function usePersisted<T, U extends Structural>(
+    source: Realm<T>,
+    initialValue: U,
+    onCreate?: (
+      source: T,
+      prevValue: U
+    ) => {
+      result: U;
+      onDelete?: (prevValue: U) => U;
+    }
+  ): Realm<U> {
+    return use(CellRealm.persisted<T, U>(source, initialValue, onCreate));
+  }
+
+  export function useTransition<T extends Structural>(
+    realm: Realm<T>
+  ): [Realm<T | null>, Realm<boolean>] {
+    // Use a single persisted cell to avoid glitch (diamond problem)
+    const combinedCell = Blueprint.usePersisted<
+      T,
+      {
+        value: T | null;
+        isTransitioning: boolean;
+        valueId: number;
+      }
+    >(
+      realm,
+      { value: null, isTransitioning: true, valueId: 0 },
+      (source, prev) => {
+        const newId = prev.valueId + 1;
+        return {
+          result: {
+            value: source,
+            isTransitioning: false,
+            valueId: newId,
+          },
+          onDelete: prevValue => {
+            if (prevValue.valueId === newId) {
+              return {
+                ...prevValue,
+                isTransitioning: true,
+              };
+            } else {
+              return prevValue;
+            }
+          },
+        };
+      }
+    );
+
+    return [combinedCell.map(v => v.value), combinedCell.map(v => v.isTransitioning)];
   }
 }
