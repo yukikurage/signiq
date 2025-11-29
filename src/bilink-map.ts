@@ -1,8 +1,18 @@
-import { Resource } from './resource';
+import { Routine, Effect } from './routine';
 
-export class BiLinkMap<A, B, L extends Resource> {
-  private aToB = new Map<A, Map<B, L>>();
-  private bToA = new Map<B, Map<A, L>>();
+type RoutineState =
+  | {
+      state: 'initialized';
+      finalize: () => MaybePromise<void>;
+    }
+  | {
+      state: 'finalizing';
+      promise: Promise<void>;
+    };
+
+export class BiLinkMap<A, B> {
+  private aToB = new Map<A, Map<B, RoutineState>>();
+  private bToA = new Map<B, Map<A, RoutineState>>();
 
   getAs(): Iterable<A> {
     return this.aToB.keys();
@@ -12,70 +22,87 @@ export class BiLinkMap<A, B, L extends Resource> {
     return this.bToA.keys();
   }
 
-  async link(a: A, b: B, link: L): Promise<void> {
-    // Release existing link if it exists to prevent memory leaks
-    const existingLink = this.aToB.get(a)?.get(b);
-    if (existingLink) {
-      await existingLink.release();
+  link(a: A, b: B, component: Routine<void>): void {
+    const { finalize } = component.initialize();
+    if (!this.aToB.has(a)) {
+      this.aToB.set(a, new Map());
     }
-
-    (this.aToB.get(a) ?? this.aToB.set(a, new Map()).get(a)!).set(b, link);
-    (this.bToA.get(b) ?? this.bToA.set(b, new Map()).get(b)!).set(a, link);
+    if (!this.bToA.has(b)) {
+      this.bToA.set(b, new Map());
+    }
+    this.aToB.get(a)!.set(b, {
+      state: 'initialized',
+      finalize,
+    });
+    this.bToA.get(b)!.set(a, {
+      state: 'initialized',
+      finalize,
+    });
   }
 
   /** Unlink A and B */
-  async unlink(a: A, b: B): Promise<void> {
+  unlink(a: A, b: B): MaybePromise<void> {
     const link = this.aToB.get(a)?.get(b);
     if (!link) return;
+    if (link.state === 'finalizing') return link.promise;
+    const maybePromise = link.finalize();
+    if (maybePromise instanceof Promise) {
+      const finalizePromise = maybePromise.then(() => {
+        this.aToB.get(a)?.delete(b);
+        this.bToA.get(b)?.delete(a);
+      });
+      const newLink = {
+        state: 'finalizing' as const,
+        promise: finalizePromise,
+      };
+      this.aToB.get(a)?.set(b, newLink);
+      this.bToA.get(b)?.set(a, newLink);
+      return finalizePromise;
+    }
     this.aToB.get(a)?.delete(b);
     this.bToA.get(b)?.delete(a);
-    await link.release();
+    return;
+  }
+
+  /** Link A to all B */
+  linkAllA(a: A, component: (b: B) => Routine<void>): void {
+    this.aToB.set(a, new Map());
+    const bs = this.bToA.keys();
+    [...bs].map(b => this.link(a, b, component(b)));
+  }
+
+  /** Link B to all A */
+  linkAllB(b: B, component: (a: A) => Routine<void>): void {
+    this.bToA.set(b, new Map());
+    const as = this.aToB.keys();
+    [...as].map(a => this.link(a, b, component(a)));
   }
 
   /** Unlink all links associated with A */
-  async unlinkAllA(a: A): Promise<void> {
-    const bs = this.aToB.get(a);
-    if (!bs) return;
-
-    // Delete from B side as well, and release all in parallel
-    await Promise.all(
-      [...bs].map(async ([b, link]) => {
-        this.bToA.get(b)?.delete(a);
-        await link.release();
-      })
-    );
-
-    this.aToB.delete(a);
+  unlinkAllA(a: A): MaybePromise<void> {
+    const bs = this.bToA.keys();
+    const promises = [...bs].map(b => this.unlink(a, b));
+    if (promises.some(p => p instanceof Promise)) {
+      return Promise.all(promises).then(() => {});
+    }
   }
 
   /** Unlink all links associated with B */
-  async unlinkAllB(b: B): Promise<void> {
-    const as = this.bToA.get(b);
-    if (!as) return;
-
-    await Promise.all(
-      [...as].map(async ([a, link]) => {
-        this.aToB.get(a)?.delete(b);
-        await link.release();
-      })
-    );
-
-    this.bToA.delete(b);
+  unlinkAllB(b: B): MaybePromise<void> {
+    const as = this.aToB.keys();
+    const promises = [...as].map(a => this.unlink(a, b));
+    if (promises.some(p => p instanceof Promise)) {
+      return Promise.all(promises).then(() => {});
+    }
   }
 
   /** Unlink and clear all links */
-  async unlinkAll(): Promise<void> {
-    const allLinks: L[] = [];
-    for (const [, inner] of this.aToB) {
-      for (const [, link] of inner) allLinks.push(link);
+  unlinkAll(): MaybePromise<void> {
+    const as = this.aToB.keys();
+    const promises = [...as].map(a => this.unlinkAllA(a));
+    if (promises.some(p => p instanceof Promise)) {
+      return Promise.all(promises).then(() => {});
     }
-    this.aToB.clear();
-    this.bToA.clear();
-    await Promise.all(allLinks.map(l => l.release()));
-  }
-
-  clear(): void {
-    this.aToB.clear();
-    this.bToA.clear();
+    return;
   }
 }
