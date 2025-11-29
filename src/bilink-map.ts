@@ -83,8 +83,11 @@ export class BiLinkMap<A, B> {
     const bs = this.bToA.keys();
     const promises = [...bs].map(b => this.unlink(a, b));
     if (promises.some(p => p instanceof Promise)) {
-      return Promise.all(promises).then(() => {});
+      return Promise.all(promises).then(() => {
+        this.aToB.delete(a);
+      });
     }
+    this.aToB.delete(a);
   }
 
   /** Unlink all links associated with B */
@@ -92,8 +95,11 @@ export class BiLinkMap<A, B> {
     const as = this.aToB.keys();
     const promises = [...as].map(a => this.unlink(a, b));
     if (promises.some(p => p instanceof Promise)) {
-      return Promise.all(promises).then(() => {});
+      return Promise.all(promises).then(() => {
+        this.bToA.delete(b);
+      });
     }
+    this.bToA.delete(b);
   }
 
   /** Unlink and clear all links */

@@ -9,6 +9,7 @@ export const useEffect = B.useEffect;
 export const useTimeout = B.useTimeout;
 export const useAtom = B.useAtom;
 export const usePortal = B.usePortal;
+export const useConnection = B.useConnection;
 export const useDerivation = B.useDerivation;
 export const useAll = B.useAll;
 export const useFork = B.useFork;

@@ -12,6 +12,7 @@ import {
   useDerivation,
   Atom,
   useFork,
+  useConnection,
 } from '../src';
 
 const useLog = (logs: LogCapture, label: string, releaseLabel?: string) =>
@@ -195,12 +196,12 @@ describe('Blueprint basic functionality', () => {
         });
 
         useDerivation(refetchAtom, refetch => {
-          portal.connect(refetch);
+          useConnection(portal, refetch);
         });
 
         useDerivation(refetchAtom, refetch => {
           useTimeout(10);
-          portal.connect(refetch + 100);
+          useConnection(portal, refetch + 100);
         });
 
         useTimeout(20);
@@ -223,13 +224,13 @@ describe('Blueprint basic functionality', () => {
       let result = logs.expect([
         'created: 0',
         'created: 100',
-        'created: 5',
         'released: 0',
         'released: 100',
+        'created: 5',
         'created: 105',
-        'created: 10',
         'released: 5',
         'released: 105',
+        'created: 10',
         'created: 110',
       ]);
       assert.strictEqual(result.passed, true, result.message);

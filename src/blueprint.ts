@@ -249,4 +249,8 @@ export namespace Blueprint {
       })
     );
   }
+
+  export function useConnection<T>(portal: Portal<T>, val: T): void {
+    return Blueprint.use(portal.connect(val));
+  }
 }
