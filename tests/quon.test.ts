@@ -2,8 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { LogCapture } from './test-utils';
 import {
-  Blueprint,
-  use,
   useEffect,
   useTimeout,
   usePortal,
@@ -13,9 +11,10 @@ import {
   Atom,
   useFork,
   useConnection,
+  createContext,
 } from '../src';
 
-const useLog = (logs: LogCapture, label: string, releaseLabel?: string) =>
+const useLog = (logs: LogCapture, label: string, releaseLabel?: string): void =>
   useEffect(addRelease => {
     logs.log(`${label}`);
     if (releaseLabel) {
@@ -29,7 +28,7 @@ describe('Blueprint basic functionality', () => {
   it('should create a pure blueprint and collect its value', async () => {
     const logs = new LogCapture();
 
-    const blueprint = () => {
+    const blueprint = (): void => {
       const value = 42;
       useLog(logs, `value: ${value}`);
     };
@@ -47,7 +46,7 @@ describe('Blueprint basic functionality', () => {
     it('should create an atom and update values', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const atom = useAtom<number>(0);
 
         useDerivation(atom, value => {
@@ -90,7 +89,7 @@ describe('Blueprint basic functionality', () => {
     it('should skip duplicate values', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const atom = useAtom<number>(1);
 
         useDerivation(atom, value => {
@@ -117,7 +116,7 @@ describe('Blueprint basic functionality', () => {
     it('should handle function updates', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const atom = useAtom<number>(0);
 
         useDerivation(atom, value => {
@@ -143,7 +142,7 @@ describe('Blueprint basic functionality', () => {
     it('should handle multiple observers independently', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const atom = useAtom<number>(0);
 
         useDerivation(atom, value => {
@@ -186,7 +185,7 @@ describe('Blueprint basic functionality', () => {
     it('should create a portal and update values', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const portal = usePortal();
 
         const refetchAtom = useAtom<number>(0);
@@ -221,7 +220,7 @@ describe('Blueprint basic functionality', () => {
       // Then old values (0) are released
       // Then second store (with timeout) completes and creates portal value (105)
       // Then old value (100) is released
-      let result = logs.expect([
+      const result = logs.expect([
         'created: 0',
         'created: 100',
         'released: 0',
@@ -243,7 +242,7 @@ describe('Blueprint basic functionality', () => {
     it('should be cancellable white executing', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const cell1 = useAtom<number>(0);
         const cell2 = useAtom<number>(100);
 
@@ -292,9 +291,9 @@ describe('Blueprint basic functionality', () => {
     it('should use context properly', async () => {
       const logs = new LogCapture();
 
-      const counterCtx = Blueprint.createContext<Atom<number>>();
+      const counterCtx = createContext<Atom<number>>();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const cell = useAtom<number>(0);
         counterCtx.useProvider(cell);
 
@@ -327,7 +326,7 @@ describe('Blueprint basic functionality', () => {
     it('should be safe to call release() multiple times', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         useLog(logs, 'created');
       };
 
@@ -348,7 +347,7 @@ describe('Blueprint basic functionality', () => {
     it('should fire observer only once for two cell dependencies', async () => {
       const logs = new LogCapture();
 
-      const blueprint = () => {
+      const blueprint = (): void => {
         const cell1 = useAtom<number>(1);
         const cell2 = useAtom<string>('a');
 
