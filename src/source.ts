@@ -1,6 +1,7 @@
 import { BiLinkMap } from './bilink-map';
 import { Routine, Effect } from './routine';
 import { Structural } from './structural';
+import { MaybePromise } from './util';
 
 export abstract class Source<T> {
   public abstract subscribe: (
@@ -8,37 +9,27 @@ export abstract class Source<T> {
   ) => Routine<void>;
 
   public map = <U>(fn: (val: T) => U): Source<U> => {
-    const source = this;
-    return new (class extends Source<U> {
-      public subscribe = (listener: (val: U) => Routine<void>) =>
-        source.subscribe(val => listener(fn(val)));
-    })();
+    return new BasicSource<U>(listener =>
+      this.subscribe(val => listener(fn(val)))
+    );
   };
 
   public merge = (other: Source<T>): Source<T> => {
-    const source = this;
-    const otherSource = other;
-    return new (class extends Source<T> {
-      public subscribe = (listener: (val: T) => Routine<void>) =>
-        Routine.all([
-          source.subscribe(listener),
-          otherSource.subscribe(listener),
-        ]).map(() => {});
-    })();
+    return new BasicSource<T>(listener =>
+      Routine.all([this.subscribe(listener), other.subscribe(listener)]).map(
+        () => {}
+      )
+    );
   };
 
   public flatMap = <U>(fn: (val: T) => Source<U>): Source<U> => {
-    const source = this;
-    return new (class extends Source<U> {
-      public subscribe = (listener: (val: U) => Routine<void>) =>
-        source.subscribe(val => fn(val).subscribe(listener));
-    })();
+    return new BasicSource<U>(listener =>
+      this.subscribe(val => fn(val).subscribe(listener))
+    );
   };
 
   public combine = <U>(other: Source<U>): Source<[T, U]> => {
-    const source = this;
-    const otherSource = other;
-    return source.flatMap(val => otherSource.map(otherVal => [val, otherVal]));
+    return this.flatMap(val => other.map(otherVal => [val, otherVal]));
   };
 
   public static combineAll = <U extends unknown[]>(
@@ -47,46 +38,52 @@ export abstract class Source<T> {
     }
   ): Source<U> => {
     if (sources.length === 0) {
-      return new (class extends Source<U> {
-        public subscribe = (listener: (val: U) => Routine<void>) =>
-          listener([] as unknown as U);
-      })();
+      return new BasicSource<U>(listener => listener([] as unknown as U));
     }
 
-    return new (class extends Source<U> {
-      public subscribe = (listener: (val: U) => Routine<void>) => {
-        const chain = (index: number, collected: unknown[]): Routine<void> => {
-          if (index === sources.length) {
-            return listener(collected as U);
-          }
-          return sources[index]!.subscribe(val =>
-            chain(index + 1, [...collected, val])
-          );
-        };
-        return chain(0, []);
+    return new BasicSource<U>(listener => {
+      const chain = (index: number, collected: unknown[]): Routine<void> => {
+        if (index === sources.length) {
+          return listener(collected as U);
+        }
+        return sources[index]!.subscribe(val =>
+          chain(index + 1, [...collected, val])
+        );
       };
-    })();
+      return chain(0, []);
+    });
   };
 
   public filter = (predicate: (val: T) => boolean): Source<T> => {
-    const source = this;
-    return new (class extends Source<T> {
-      public subscribe = (listener: (val: T) => Routine<void>) =>
-        source.subscribe(val =>
-          predicate(val) ? listener(val) : Routine.resolve(undefined)
-        );
-    })();
+    return new BasicSource<T>(listener =>
+      this.subscribe(val =>
+        predicate(val) ? listener(val) : Routine.resolve(undefined)
+      )
+    );
   };
 
   public derive = <U>(fn: (val: T) => Routine<U>): Routine<Source<U>> => {
-    const source = this;
     return new Effect(addFinalizeFn => {
       const portal = new Portal<U>();
       addFinalizeFn(() => portal.finalize());
       return portal;
     }).then(portal =>
-      source.subscribe(val => fn(val).then(portal.connect)).map(() => portal)
+      this.subscribe(val => fn(val).then(u => portal.connect(u))).map(
+        () => portal
+      )
     );
+  };
+}
+
+export class BasicSource<T> extends Source<T> {
+  constructor(
+    private subscribeFn: (listener: (val: T) => Routine<void>) => Routine<void>
+  ) {
+    super();
+  }
+
+  public subscribe = (listener: (val: T) => Routine<void>): Routine<void> => {
+    return this.subscribeFn(listener);
   };
 }
 
@@ -104,11 +101,10 @@ export class Atom<T extends Structural> extends Source<T> {
   }
 
   public subscribe = (listener: (value: T) => Routine<void>): Routine<void> => {
-    const source = this;
     return new Effect(addFinalizeFn => {
-      source.biLinks.linkAllB(listener, val => listener(val.value));
+      this.biLinks.linkAllB(listener, val => listener(val.value));
       addFinalizeFn(() => {
-        return source.biLinks.unlinkAllB(listener);
+        return this.biLinks.unlinkAllB(listener);
       });
     });
   };
@@ -143,25 +139,23 @@ export class Portal<T> extends Source<T> {
   }
 
   public subscribe = (callback: (val: T) => Routine<void>): Routine<void> => {
-    const source = this;
     return new Effect(addFinalizeFn => {
-      source.biLinks.linkAllB(callback, val => callback(val.value));
+      this.biLinks.linkAllB(callback, val => callback(val.value));
       addFinalizeFn(() => {
-        return source.biLinks.unlinkAllB(callback);
+        return this.biLinks.unlinkAllB(callback);
       });
     });
   };
 
-  public connect = (value: T): Routine<void> => {
-    const source = this;
+  public connect(value: T): Routine<void> {
     const valueRef = { value };
     return new Effect(addFinalizeFn => {
       addFinalizeFn(() => {
-        return source.biLinks.unlinkAllA(valueRef);
+        return this.biLinks.unlinkAllA(valueRef);
       });
-      source.biLinks.linkAllA(valueRef, valToRoutine => valToRoutine(value));
+      this.biLinks.linkAllA(valueRef, valToRoutine => valToRoutine(value));
     });
-  };
+  }
 
   public finalize = (): MaybePromise<void> => {
     return this.biLinks.unlinkAll();

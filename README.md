@@ -1,14 +1,15 @@
 # @quon/core
 
-A lightweight reactive programming library built around **Realm**, **Blueprint**, and **Store** - providing a declarative API for managing reactive resource and side effects with automatic cleanup.
+A lightweight reactive programming library built around **Source**, **Routine**, and **Atom** - providing a declarative API for managing reactive resources and side effects with automatic cleanup.
 
 ## Features
 
-- **Realm Streams**: Represent values that change over time
-- **Blueprint DSL**: Synchronous-style syntax for composing reactive operations
-- **Store Management**: Handle multiple concurrent values with automatic lifecycle
-- **Context API**: Type-safe dependency injection for Blueprints
-- **Automatic Cleanup**: Resources are released in proper order automatically
+- **Source<T>**: Represents a reactive stream of values.
+- **Routine<T>**: Represents a task or process with a lifecycle (initialize/finalize).
+- **Blueprint DSL**: Synchronous-style syntax for composing routines.
+- **Atom<T>**: Managed single-value state container.
+- **Portal<T>**: Dynamic multi-value state container.
+- **Automatic Cleanup**: Resources are released in proper order automatically.
 
 ## Installation
 
@@ -20,21 +21,20 @@ npm install @quon/core
 
 ```typescript
 import {
-  use,
+  toRoutine,
+  useAtom,
+  useDerivation,
   useEffect,
   useTimeout,
-  useCell,
-  useStore,
-  toStore,
+  useConnection,
 } from '@quon/core';
 
 const counterApp = () => {
-  // Create a state with getter and setter
-  const [count, setCount] = useCell(0);
+  // Create an atom (state)
+  const count = useAtom(0);
 
-  // Create a reactive computation that observes count
-  useStore(() => {
-    const value = use(count);
+  // Derive a value and run a side effect
+  useDerivation(count, value => {
     useEffect(() => {
       console.log('Count:', value);
     });
@@ -42,346 +42,139 @@ const counterApp = () => {
 
   // Update count after 1 second
   useTimeout(1000);
-  useEffect(async () => {
-    await setCount(1);
-  });
+  useEffect(() => count.set(1));
 
   useTimeout(1000);
-  useEffect(async () => {
-    await setCount(2);
-  });
+  useEffect(() => count.set(2));
 };
 
-const store = toStore(counterApp);
+// Execute the blueprint
+const app = toRoutine(counterApp).initialize();
 
 // Later: cleanup
-// await store.release();
+// await app.finalize();
 ```
 
 ## Core Concepts
 
-### Realm
+### Source<T>
 
-`Realm<T>` represents a space where resources are created and released. It can be transformed, filtered, and combined.
+`Source<T>` represents a stream of values that can be observed. It is the fundamental building block for reactive data flow.
 
 ```typescript
-import { Realm } from '@quon/core';
-
-// Create from a value
-const rlm = Realm.pure(42);
+import { Source, Routine } from '@quon/core';
 
 // Transform values
-const doubled = rlm.flatMap(x => Realm.pure(x * 2));
+const doubled = source.map(x => x * 2);
 
 // Filter values
-const evens = rlm.filter(x => x % 2 === 0);
+const evens = source.filter(x => x % 2 === 0);
 
-// Merge streams
-const combined = rlm1.merge(rlm2);
+// Combine sources
+const combined = Source.combineAll(source1, source2);
+```
+
+### Routine<T>
+
+`Routine<T>` represents a process that produces a result `T` and has a lifecycle (it can be finalized). Blueprints are compiled into Routines.
+
+```typescript
+import { Routine } from '@quon/core';
+
+const routine = new Routine(...);
+const { result, finalize } = routine.initialize();
+
+// ... later
+await finalize();
 ```
 
 ### Blueprint
 
-`Blueprint` is a synchronous-style DSL for composing Realms. All `useX` functions must be called at the top level of a Blueprint.
+`Blueprint` is a synchronous-style DSL for composing Routines.
 
 ```typescript
-import { Blueprint, toStore } from '@quon/core';
+import { toRoutine, useAtom, useEffect } from '@quon/core';
 
 const myBlueprint = () => {
-  // Iterate over values
-  const num = Blueprint.useIterable([1, 2, 3, 4, 5]);
+  const atom = useAtom(0);
 
-  // Filter with guard
-  Blueprint.useGuard(() => num % 2 === 0);
-
-  // Side effects
-  Blueprint.useEffect(() => {
-    console.log('Even number:', num);
+  // Side effects must be wrapped in useEffect
+  useEffect(() => {
+    console.log('Atom created');
   });
 };
 
-const store = toStore(myBlueprint);
+const app = toRoutine(myBlueprint).initialize();
 ```
 
-#### Important Blueprint Rules
+### Atom<T>
 
-1. **`useX` functions must be at the top level** - However, you CAN use `if` and loops if they depend only on `const` values (including values created within the Blueprint). When a dependency changes, the Blueprint re-executes from the beginning, canceling all subsequent processing.
-2. **Don't catch exceptions across `use()` boundaries** - This breaks Blueprint control flow
-3. **Side effects must use `useEffect`** - All I/O, console.log, timers, etc.
-
-### Store
-
-`Store<T>` represents a **collection of values** that are acquired and released over time, rather than a single changing value. Multiple values can coexist simultaneously in a Store.
+`Atom<T>` is a `Source<T>` that holds a single current value. It is similar to a "cell" or "signal" in other libraries.
 
 ```typescript
-import { Blueprint, toStore } from '@quon/core';
+const count = useAtom(0);
 
-// Create from Blueprint
-const store = toStore(() => {
-  const value = Blueprint.useIterable([1, 2, 3]);
-  Blueprint.useEffect(() => console.log(value));
-});
+// Update value
+useEffect(() => count.set(1));
 
-// Get ALL current values (multiple can exist simultaneously)
-const values = [...store.peek()]; // [1, 2, 3]
-
-// Cleanup
-await store.release();
+// Modify based on previous value
+useEffect(() => count.modify(prev => prev + 1));
 ```
 
-#### useCell - Managed Single Value
+### Portal<T>
 
-Creates a Store that holds at most one value at a time. When you set a new value, the old value is released and replaced.
-
-```typescript
-import { use, useEffect, useCell, useStore } from '@quon/core';
-
-const myApp = () => {
-  const [count, setCount] = useCell(0);
-
-  useStore(() => {
-    console.log('Count is:', use(count));
-  });
-
-  // Replace the current value (releases old, creates new)
-  await setCount(5);
-};
-```
-
-#### usePortal - Dynamic Value Collection
-
-Creates a Store where you can add/remove values within a Blueprint. **Multiple values can coexist** - each call to the setter function adds or removes a value from the Store.
+`Portal<T>` is a `Source<T>` that allows dynamic connections. It represents a collection of values where items can be added or removed dynamically.
 
 ```typescript
-import { use, useEffect, usePortal, useStore } from '@quon/core';
+const portal = usePortal<string>();
 
-const myApp = () => {
-  const [items, useAddItem] = usePortal<number>();
-
-  useStore(() => {
-    const item = use(items);
-    console.log('Item:', item);
-  });
-
-  // The setter is a Blueprint function (useX) - must be called within a Blueprint
-  useStore(() => {
-    useAddItem(1); // Adds value 1 (exists while this Blueprint scope is active)
-  });
-
-  useStore(() => {
-    useAddItem(2); // Adds value 2 (both 1 and 2 now exist in the Store)
-  });
-
-  // When a Blueprint scope exits, its values are automatically released
-};
-```
-
-### Context
-
-Type-safe dependency injection for Blueprints:
-
-```typescript
-import { Blueprint, useStore } from '@quon/core';
-
-// Create context
-const ThemeContext = Blueprint.createContext<'light' | 'dark'>();
-
-const app = () => {
-  // Provide value
-  ThemeContext.useProvider('dark');
-
-  useStore(() => {
-    // Consume value
-    const theme = ThemeContext.useConsumer();
-    console.log('Current theme:', theme);
-  });
-};
+// Connect a value to the portal
+useConnection(portal, 'Hello');
 ```
 
 ## API Reference
 
-### Convenience Exports (React-like)
+### Top-Level Exports
 
-These functions are exported directly for convenience:
+- **`toRoutine<T>(blueprint: () => T): Routine<T>`**
+  - Converts a Blueprint function into a Routine.
 
-- **`use<T>(realm: Realm<T>): T`**
-  - Shorthand for `Blueprint.use()` - uses Realm within Blueprint
+- **`useAtom<T>(initialValue: T): Atom<T>`**
+  - Creates a managed single-value state.
 
-- **`useEffect<T>(maker: (addResource, abortSignal) => T | Promise<T>): T`**
-  - Executes side effects with cleanup
-  - Use for all I/O, console.log, timers, etc.
+- **`usePortal<T>(): Portal<T>`**
+  - Creates a dynamic multi-value state.
+
+- **`useDerivation<T, U>(source: Source<T>, blueprint: (val: T) => U): Source<U>`**
+  - Derives a new Source by applying a Blueprint to each value.
+
+- **`useEffect<T>(maker: (addFinalizeFn, abortSignal) => T): T`**
+  - Executes a side effect with cleanup.
 
 - **`useTimeout(delayMs: number): void`**
-  - Pauses execution for specified milliseconds
+  - Pauses execution for a specified duration.
 
-- **`useGuard(predicate: () => boolean): void`**
-  - Conditionally continues (like filter)
+- **`useConnection<T>(portal: Portal<T>, val: T): void`**
+  - Connects a value to a Portal.
 
-- **`useIterable<T>(iterable: Iterable<T>): T`**
-  - Iterates over values, emitting each
+- **`use<T>(routine: Routine<T>): T`**
+  - Uses a Routine within a Blueprint.
 
-- **`useNever(): never`**
-  - Stops execution (no values emitted)
+### Classes
 
-- **`useCell<T>(initialValue: T): [Store<T>, (value: T) => Promise<void>]`**
-  - Managed single-value Store (setter replaces value, deduplicates)
+- **`Source<T>`**
+  - `map<U>(fn: (val: T) => U): Source<U>`
+  - `flatMap<U>(fn: (val: T) => Source<U>): Source<U>`
+  - `filter(predicate: (val: T) => boolean): Source<T>`
+  - `merge(other: Source<T>): Source<T>`
+  - `combine<U>(other: Source<U>): Source<[T, U]>`
+  - `derive<U>(fn: (val: T) => Routine<U>): Routine<Source<U>>`
 
-- **`usePortal<T>(): [Store<T>, (value: T) => void]`**
-  - Dynamic value collection Store (setter adds/removes values)
-
-- **`useStore<T>(blueprint: () => T): Store<T>`**
-  - Creates Store within parent Blueprint (registers for cleanup)
-
-- **`toStore<T>(blueprint: () => T): Store<T>`**
-  - Creates Store from Blueprint (external use)
-
-### Blueprint Namespace
-
-- **`Blueprint.toRealm<T>(blueprint: () => T): Realm<T>`**
-  - Converts Blueprint to Realm
-
-- **`Blueprint.createContext<T>(): Context<T>`**
-  - Creates context for dependency injection
-
-- **`Blueprint.useUserContext(): UserContext`**
-  - Returns current context values
-
-### Store
-
-- **`new Store<T>(realm: Realm<T>)`**
-  - Creates Store from Realm directly
-
-- **`Store.newStoreRealm<T>(rlm: Realm<T>): Realm<Store<T>>`**
-  - Low-level: Wraps Realm in Store, returns effect Realm
-
-- **`Store.newCellRealm<T>(initialValue: T): Realm<[Store<T>, Setter]>`**
-  - Low-level: Single-value cell Realm
-
-- **`Store.newPortalRealm<T>(): Realm<[Store<T>, (T) => Realm<void>]>`**
-  - Low-level: Multi-value portal Realm
-
-- **`store.peek(): Iterable<T>`**
-  - Returns current values without creating dependencies
-
-- **`store.release(): Promise<void>`**
-  - Releases all resources (idempotent)
-
-### Realm Methods
-
-- **`realm.instantiate(observer: (value: T) => Resource): Resource`**
-  - Subscribe to value changes
-
-- **`realm.flatMap<U>(f: (value: T) => Realm<U>): Realm<U>`**
-  - Transform and flatten
-
-- **`realm.filter(predicate: (value: T) => boolean): Realm<T>`**
-  - Filter values
-
-- **`realm.merge<U>(other: Realm<U>): Realm<T | U>`**
-  - Merge two streams
-
-### Resource
-
-Resources that need cleanup:
-
-- **`Resource.parallel(set: Iterable<Resource>): Resource`**
-  - Releases all in parallel
-
-- **`Resource.sequential(set: Iterable<Resource>): Resource`**
-  - Releases in order
-
-- **`Resource.noop`**
-  - No-op resource
-
-## Common Pitfalls
-
-1. ❌ **Don't catch exceptions around `use()` calls**
-
-   ```typescript
-   // BAD - breaks Blueprint control flow
-   try {
-     const value = use(realm);
-   } catch (e) {
-     // This will catch internal BLUEPRINT_CHAIN_EXCEPTION_SYMBOL
-   }
-   ```
-
-2. ❌ **Don't call `useX` inside conditionals that depend on mutable values**
-
-   ```typescript
-   // BAD - if depends on reactive value
-   let mutableValue = 0;
-   // ... somewhere else, mutableValue changes ...
-   if (mutableValue > 5) {
-     const value = use(realm); // Wrong!
-   }
-
-   // OK - if depends on const value
-   const constValue = use(reactiveValue);
-   if (constValue > 5) {
-     const value = use(realm); // This is fine
-   }
-   ```
-
-3. ❌ **Don't forget to call `release()`**
-
-   ```typescript
-   const store = toStore(myApp);
-   // ... use store ...
-   await store.release(); // Important!
-   ```
-
-4. ❌ **Don't use side effects outside `useEffect`**
-   ```typescript
-   // BAD - breaks determinism
-   const value = use(realm);
-   console.log(value); // Should be in useEffect
-   ```
-
-## Development
-
-```bash
-# Run tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Build
-npm run build
-
-# Lint
-npm run lint
-
-# Format
-npm run format
-```
-
-## Project Structure
-
-```
-quon/
-├── src/                  # Source code
-│   ├── realm.ts          # Realm implementation
-│   ├── blueprint.ts      # Blueprint DSL implementation
-│   ├── store.ts          # Store class for value collection management
-│   ├── resource.ts     # Resource interface and utilities
-│   ├── bilink-map.ts     # Bidirectional map for observers/values
-│   ├── task-queue.ts     # Task queue for async operations
-│   └── index.ts          # Public exports + convenience re-exports
-├── tests/                # Test files
-│   ├── quon.test.ts      # Main test suite
-│   └── test-utils.ts     # Test utilities
-└── examples/             # Example usage (if any)
-```
-
-## Architecture Notes
-
-- **Synchronous Blueprint execution**: Blueprints run synchronously until a `use()` call, then re-execute from the beginning when dependencies change
-- **Exception-based control flow**: `BlueprintChainException` is used internally for continuations
-- **Automatic lifecycle**: Store manages acquisition and release of value collections automatically
-- **Value collections, not single values**: Store represents a set of values that exist simultaneously, acquired and released over time
-- **Separation of concerns**: Store provides low-level Realm-based APIs; Blueprint provides convenience wrappers
+- **`Routine<T>`**
+  - `initialize(): { result: MaybePromise<T>, finalize: () => MaybePromise<void> }`
+  - `static all<T>(routines: Routine<T>[]): Routine<T>`
+  - `static race<T>(routines: Routine<T>[]): Routine<T>`
+  - `static resolve<T>(value: T): Routine<T>`
 
 ## License
 

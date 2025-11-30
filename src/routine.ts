@@ -1,3 +1,5 @@
+import { MaybePromise } from './util';
+
 export type Fiber<T> = {
   result: MaybePromise<T>;
 };
@@ -5,66 +7,54 @@ export type Fiber<T> = {
 export abstract class Routine<T> {
   public abstract initialize: () => {
     result: MaybePromise<T>;
-    finalize(): MaybePromise<void>;
+    finalize: () => MaybePromise<void>;
   };
 
   public map = <U>(fn: (result: T) => U): Routine<U> => {
-    const source = this;
-    return new (class extends Routine<U> {
-      public initialize = (): {
-        result: MaybePromise<U>;
-        finalize(): MaybePromise<void>;
-      } => {
-        const { result, finalize } = source.initialize();
-        return {
-          result: result instanceof Promise ? result.then(fn) : fn(result),
-          finalize,
-        };
+    return new BasicRoutine(() => {
+      const { result, finalize } = this.initialize();
+      return {
+        result: result instanceof Promise ? result.then(fn) : fn(result),
+        finalize,
       };
-    })();
+    });
   };
 
   public then = <U>(fn: (result: T) => Routine<U>): Routine<U> => {
-    const source = this;
-    return new (class extends Routine<U> {
-      public initialize = (): {
-        result: MaybePromise<U>;
-        finalize(): MaybePromise<void>;
-      } => {
-        const { result, finalize } = source.initialize();
-        let innerFinalize: (() => MaybePromise<void>) | undefined;
-        let isFinalized = false;
-        let innerResult: MaybePromise<U>;
+    return new BasicRoutine(() => {
+      const { result, finalize } = this.initialize();
+      let innerFinalize: (() => MaybePromise<void>) | undefined;
+      let isFinalized = false;
+      let innerResult: MaybePromise<U>;
 
-        if (result instanceof Promise) {
-          innerResult = result.then(val => {
-            if (isFinalized) {
-              throw new Error('Routine finalized');
-            }
-            const inner = fn(val).initialize();
-            innerFinalize = inner.finalize;
-            return inner.result;
-          });
-        } else {
-          const inner = fn(result).initialize();
+      if (result instanceof Promise) {
+        innerResult = result.then(val => {
+          if (isFinalized) {
+            throw new Error('Routine finalized');
+          }
+          const inner = fn(val).initialize();
           innerFinalize = inner.finalize;
-          innerResult = inner.result;
-        }
-        return {
-          result: innerResult,
-          finalize: () => {
-            isFinalized = true;
-            if (innerFinalize) {
-              const res = innerFinalize();
-              if (res instanceof Promise) {
-                return res.then(finalize);
-              }
+          return inner.result;
+        });
+      } else {
+        const inner = fn(result).initialize();
+        innerFinalize = inner.finalize;
+        innerResult = inner.result;
+      }
+      return {
+        result: innerResult,
+        finalize: (): MaybePromise<void> => {
+          isFinalized = true;
+          if (innerFinalize) {
+            const res = innerFinalize();
+            if (res instanceof Promise) {
+              return res.then(finalize);
             }
-            return finalize();
-          },
-        };
+          }
+          return finalize();
+        },
       };
-    })();
+    });
   };
 
   public static resolve = <T>(value: T): Routine<T> => {
@@ -98,7 +88,7 @@ export abstract class Routine<T> {
           result: results.some(result => result instanceof Promise)
             ? (Promise.all(results) as Promise<T>)
             : (results as T),
-          finalize: () => {
+          finalize: (): MaybePromise<void> => {
             const finalizeResults = finalizes.map(finalize => finalize());
             return finalizeResults.some(result => result instanceof Promise)
               ? Promise.all(finalizeResults).then(() => {})
@@ -110,26 +100,40 @@ export abstract class Routine<T> {
   };
 
   public static fork = <T>(routine: Routine<T>): Routine<Fiber<T>> => {
-    return new (class extends Routine<Fiber<T>> {
-      public initialize = () => {
-        const { result, finalize } = routine.initialize();
-        return {
-          result: { result },
-          finalize,
-        };
+    return new BasicRoutine(() => {
+      const { result, finalize } = routine.initialize();
+      return {
+        result: { result },
+        finalize,
       };
-    })();
+    });
   };
 
   public static join = <T>(fiber: Fiber<T>): Routine<T> => {
-    return new (class extends Routine<T> {
-      public initialize = () => {
-        return {
-          result: fiber.result,
-          finalize: () => {},
-        };
+    return new BasicRoutine(() => {
+      return {
+        result: fiber.result,
+        finalize: (): MaybePromise<void> => {},
       };
-    })();
+    });
+  };
+}
+
+export class BasicRoutine<T> extends Routine<T> {
+  constructor(
+    private readonly initializeFn: () => {
+      result: MaybePromise<T>;
+      finalize(): MaybePromise<void>;
+    }
+  ) {
+    super();
+  }
+
+  public initialize = (): {
+    result: MaybePromise<T>;
+    finalize(): MaybePromise<void>;
+  } => {
+    return this.initializeFn();
   };
 }
 
@@ -153,7 +157,7 @@ export class Effect<T> extends Routine<T> {
     let isFinalized = false;
     let cleanupResult: MaybePromise<void>;
 
-    function finalize() {
+    const finalize = (): MaybePromise<void> => {
       if (isFinalized) return cleanupResult;
       isFinalized = true;
 
@@ -177,7 +181,7 @@ export class Effect<T> extends Routine<T> {
 
       cleanupResult = chain;
       return cleanupResult;
-    }
+    };
 
     return {
       result: this.initializeFn(finalizeFn => {

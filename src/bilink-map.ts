@@ -1,4 +1,5 @@
-import { Routine, Effect } from './routine';
+import { Routine } from './routine';
+import { MaybePromise } from './util';
 
 type RoutineState =
   | {

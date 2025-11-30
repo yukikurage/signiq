@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
+import globals from 'globals';
 
 export default [
   js.configs.recommended,
@@ -13,6 +14,10 @@ export default [
         sourceType: 'module',
         project: './tsconfig.json',
       },
+      globals: {
+        ...globals.browser,
+        ...globals.es2022,
+      },
     },
     plugins: {
       '@typescript-eslint': tseslint,
@@ -22,8 +27,9 @@ export default [
       '@typescript-eslint/no-unused-vars': 'error',
       '@typescript-eslint/explicit-function-return-type': 'warn',
       '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/prefer-const': 'error',
+      '@/prefer-const': 'error',
       '@typescript-eslint/no-inferrable-types': 'off',
+      '@typescript-eslint/unbound-method': 'error',
     },
   },
   {
