@@ -54,6 +54,12 @@ export abstract class Source<T> {
     });
   };
 
+  public static of = <T>(...values: T[]): Source<T> => {
+    return new BasicSource<T>(listener => {
+      return Routine.all(values.map(value => listener(value))).map(() => {});
+    });
+  };
+
   public filter = (predicate: (val: T) => boolean): Source<T> => {
     return new BasicSource<T>(listener =>
       this.subscribe(val =>
